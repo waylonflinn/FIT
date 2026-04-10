@@ -1,0 +1,130 @@
+# FIT Generator — Basic Mechanical Split
+
+_Effort: Involved (3)_
+
+_Capability: Design (3)_
+
+_Elapsed: ~0h_
+
+_Daily logs: Requirements/Synthesis/Research: 2026-04-09.md_
+
+_Status: Research (3/10)_
+
+_Updated: 2026-04-09_
+
+---
+
+## Goal
+
+A command-line Python script that converts an arbitrarily large markdown document into a Fitted Information Tree (FIT): a root document (≤3k tokens) linking to subdocuments (≤3k tokens each), recursively, until the entire tree satisfies the size constraints. The script must handle the full range of real-world markdown structure — headings, code blocks, ruled lines, paragraphs, sentences — and produce output that is strictly better than the existing `fit_split.py` in every case.
+
+---
+
+## Requirements
+
+**Functional requirements:**
+- Enforced size targets
+- Recursive
+- Heading detection
+- Split fallback hierarchy
+- Code block handling
+- Root document content
+- Token count annotation
+- Back up original file before any writes
+
+**Constraints and scope:**
+- Python 3; prefer a markdown parsing library over hand-rolled regex
+- Language identification via fenced code block info string (open question — see Research)
+- If a chunk cannot be split further and still exceeds the target: warn, leave as-is, do not truncate
+- Must always produce output strictly better than `fit_split.py` — no regressions
+- Out of scope: YAML/TOML front matter, HTML markdown, non-UTF-8 encodings, watch mode, batch processing
+
+Functional requirements explanation, configuration table and full details:
+→ [001_basic_mechanical/requirements.md](001_basic_mechanical/requirements.md) (~965 tokens)
+
+---
+
+## Synthesis
+
+The script is a **recursive partitioning algorithm with a sizing constraint and natural persistence of intermediaries**. At every level, the same loop applies: measure the content, decide if it fits, and if not, find the best available split strategy, write the results to the filesystem, and recurse on any output that still exceeds the target.
+
+**Core abstractions:**
+
+- **Measure** — token estimate (chars ÷ 4) drives every decision; runs on every chunk at every level
+- **Partition** — divide content using the richest semantic boundary available; strategies form a naturalness hierarchy ordered by author intent (headings → ruled lines → code blocks → paragraphs → sentences → words)
+- **Write** — partitioned chunks are written to the filesystem immediately; the filesystem is the data structure
+- **Recurse** — any written chunk that still exceeds the target is fed back through the same process; recursion is just re-invoking the algorithm on a written file
+- **Name** — headings give names for free; code blocks derive names from surrounding context; all other splits use ordered numbered filenames
+
+**Key insight:** the root document is not special. It's subject to the same sizing constraint as every subdocument. The algorithm is uniform — entry point and output nodes are all treated the same way.
+
+**Key insight:** the filesystem is the data structure. Writing intermediaries at each level makes the process naturally resumable, debuggable, and easier to reason about — no need to solve the full tree depth in memory upfront. This also suggests a clean code structure: one function that processes a single file and returns a list of outputs that need further processing, and a driver loop that applies it until no oversized files remain.
+
+**Key insight:** split strategy and sizing interact. A chunk split at code block boundaries may still produce pieces that are too large (e.g. a 6k-token code block). The recursion handles this naturally — each written piece is measured and re-split if needed, falling further down the hierarchy.
+
+**Key insight:** the strategy hierarchy represents a graceful degradation of semantic richness. Headings produce meaningful, navigable structure with natural names. Each step down — ruled lines, code blocks, paragraphs, sentences — makes meaningful link names, divisions, and summaries progressively harder to construct and more likely to degrade into arbitrary numbering. A warning when falling below paragraph-level is appropriate.
+
+The goal statement holds. No revisions needed.
+
+---
+
+## Research
+
+**Foundations:** CommonMark spec governs all our split points; its structural hierarchy maps directly onto the split strategy hierarchy.
+
+**Key findings:**
+- `markdown-it-py` (already installed): use as primary parser. Token stream includes `token.map = [start_line, end_line]` for all block tokens — use the AST for structure, line maps to slice original source faithfully (no round-trip rendering)
+- `pygments` (already installed): use `get_lexer_by_name` to normalize info strings; for unannotated blocks use `guess_lexer` with a confidence threshold (~0.5) — above threshold use the language name, below fall back to `"Code"`; threshold needs prototyping (flagged as risk)
+- Sentence splitting: stdlib regex sufficient, no NLTK needed
+- No existing markdown splitter covers this use case — building fresh
+
+**Exemplar pattern (driver loop):** Unix single-file-at-a-time — `process_file(path)` returns paths of written subdocs; a driver loop feeds oversized outputs back in. BFS/DFS over paths on disk.
+
+→ [001_basic_mechanical/research.md](001_basic_mechanical/research.md) (~1204 tokens)
+
+---
+
+## Design
+
+_To be completed._
+
+---
+
+## Risks
+
+_To be completed._
+
+---
+
+## Prototypes
+
+_To be completed._
+
+---
+
+## Implementation
+
+_To be completed._
+
+---
+
+## Tests
+
+_To be completed._
+
+---
+
+## Bugs
+
+_To be completed._
+
+---
+
+## Extensions
+
+Possible follow-on tasks identified during the build process. Out of scope for this spec but worth tracking.
+
+- **Richer name generation** — keyword extraction from surrounding prose (e.g. `yake`, `rake-nltk`) to produce more meaningful subdoc names when no heading is available, rather than slugifying the nearest paragraph text or falling back to `part-NN`
+- **Robust sentence splitting** — replace the stdlib regex fallback with `nltk.sent_tokenize` for better handling of edge cases (abbreviations, inline code with periods, parenthetical sentences)
+- **Extractive lead-in summaries** — use `sumy` (TextRank or LSA) to generate tighter one-liner summaries for root doc entries when the first paragraph is too long to inline cleanly
+- All three are optional dependencies — tool works without them, they improve output quality when present; pattern fits well for a standalone script intended for external use
