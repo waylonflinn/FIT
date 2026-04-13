@@ -44,7 +44,7 @@ paragraph_open  map=[14, 15]
 
 ### Sentence splitting — stdlib regex (no extra dependency needed)
 
-`re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)` handles the common case correctly, including abbreviations like "Fig. 1.2" and "U.S." that don't trigger false splits (uppercase lookahead prevents splitting mid-sentence). Good enough for a fallback — this is the last resort before word-splitting anyway.
+`re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)` handles the common case but will produce false splits on abbreviations followed by uppercase words — e.g. "U.S. He went home" splits on the period after 'S' because the uppercase lookahead can't distinguish sentence boundaries from abbreviation+uppercase-word boundaries. Good enough for a last resort (this is the fallback before word-splitting), but the limitation should not be papered over. Needs tests: confirm correct splits on ordinary sentences, and confirm known false-positive cases (e.g. "U.S. He", "Fig. 1 The", "Dr. Smith said").
 
 ### No existing markdown splitter/chunker found
 
@@ -81,10 +81,36 @@ This is a BFS/DFS traversal where the frontier is paths on disk. Clean, testable
 
 For non-heading splits, the best available name comes from the immediately preceding inline content. Pattern: walk backwards from the split point to find the nearest `inline` token; slugify its text; fall back to `part-NN` if empty or too long.
 
+### whats-that-code (candidate, not yet evaluated)
+
+- https://pypi.org/project/whats-that-code/ — alternative library for unannotated block detection
+- Evaluate alongside `pygments.guess_lexer` in the language detection prototype
+- **Prototype corpus:** `doc/anthropic/build-with-claude/prompt-caching.md` — contains a large annotated subdocument (~14k tokens) consisting almost entirely of code blocks; run both libraries against each block, compare predictions to actual info string annotations, record confidence scores, identify a threshold cutoff that gives acceptable accuracy
+
+### Prototype Results and Decision
+
+Prototype run against `prompt-caching-examples.md` (24 annotated code blocks, 8 languages: Python, TypeScript, C#, Go, Java, PHP, Ruby, Shell).
+
+| Library | Accuracy | Coverage | Notes |
+|---|---|---|---|
+| pygments | 12% at any threshold | 100% | Systematic Python false positives (1.00 confidence on Go, Java, TS — all wrong) |
+| whats-that-code | 38% | 100% | Confident nonsense: delphi, coldfusion, carbon, gdscript |
+| codelang-detect | 50% | 100% | Better; correct on Go, Java, PHP, partial C#; blind to Ruby, Shell, TypeScript |
+
+Per-language breakdown for codelang-detect (best performer):
+- Go ✓, Java ✓, PHP ✓, JSON ✓ — reliable
+- C# — 2/3 correct
+- Python — 2/3 correct
+- TypeScript — 0/3 (misidentified as javascript, which is syntactically nearly identical)
+- Ruby — 0/3
+- Shell — 0/2
+
+**Decision: drop language detection libraries entirely.** A confident wrong label is worse than "Code" — it would cause a TypeScript block to inline as JavaScript, or silently misfile Ruby. The error rate and systematic blind spots make runtime detection unreliable for our use case. The Anthropic docs (our primary corpus) are fully annotated; well-maintained documentation generally is. Use the info string when present, normalized via `pygments.get_lexer_by_name`; label unannotated blocks as `"Code"` and exclude them from inline preference.
+
 ## Open Questions Resolved
 
-**Language detection for unannotated blocks:** Use info string when present; fall back to `guess_lexer` with a confidence threshold (~0.5 based on initial tests) for unannotated blocks; label anything below threshold as `"Code"`. Threshold needs prototyping to confirm — flagged as a risk.
+**Language detection for unannotated blocks:** Use info string when present, normalized via `pygments.get_lexer_by_name`. Label unannotated blocks as `"Code"` and exclude them from inline preference. Detection libraries (pygments guess_lexer, whats-that-code, codelang-detect) were prototyped and rejected — best accuracy was 50% with systematic blind spots for Ruby, Shell, and TypeScript. A confident wrong label is worse than "Code". No runtime dependency on detection libraries.
 
-**Sentence splitting:** stdlib regex is sufficient; no NLTK needed.
+**Sentence splitting:** stdlib regex is sufficient as a last resort; no NLTK needed. Known limitation: false splits on abbreviations followed by uppercase words (e.g. "U.S. He went home"). Acceptable given it's the fallback before word-splitting, but tests should exercise both the common case and known failure cases.
 
 **Round-trip fidelity:** Use token line maps to slice original source lines. Do not render tokens back to markdown — this avoids any reformatting or content loss.

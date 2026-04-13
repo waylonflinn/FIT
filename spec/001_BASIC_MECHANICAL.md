@@ -4,13 +4,13 @@ _Effort: Involved (3)_
 
 _Capability: Design (3)_
 
-_Elapsed: ~0h_
+_Elapsed: ~1d_
 
 _Daily logs: Requirements/Synthesis/Research: 2026-04-09.md_
 
-_Status: Research (3/10)_
+_Status: Design (4/10)_
 
-_Updated: 2026-04-09_
+_Updated: 2026-04-10_
 
 ---
 
@@ -28,7 +28,7 @@ A command-line Python script that converts an arbitrarily large markdown documen
 - Heading detection
 - Split fallback hierarchy
 - Code block handling
-- Root document content
+- Document content (uniform at all levels)
 - Token count annotation
 - Back up original file before any writes
 
@@ -40,7 +40,7 @@ A command-line Python script that converts an arbitrarily large markdown documen
 - Out of scope: YAML/TOML front matter, HTML markdown, non-UTF-8 encodings, watch mode, batch processing
 
 Functional requirements explanation, configuration table and full details:
-→ [001_basic_mechanical/requirements.md](001_basic_mechanical/requirements.md) (~965 tokens)
+→ [001_basic_mechanical/requirements.md](001_basic_mechanical/requirements.md) (~1418 tokens)
 
 ---
 
@@ -80,25 +80,28 @@ The goal statement holds. No revisions needed.
 
 **Exemplar pattern (driver loop):** Unix single-file-at-a-time — `process_file(path)` returns paths of written subdocs; a driver loop feeds oversized outputs back in. BFS/DFS over paths on disk.
 
-→ [001_basic_mechanical/research.md](001_basic_mechanical/research.md) (~1204 tokens)
+→ [001_basic_mechanical/research.md](001_basic_mechanical/research.md) (~1539 tokens)
 
 ---
 
 ## Design
 
-_To be completed._
+Initial component proposal: Driver Loop, process_file, Measurer, Heading Detector, Splitter, Code Block Handler, Name Generator, Writer. Open question: where the inline vs. subdoc decision lives (Splitter vs. Writer).
+
+→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~1157 tokens)
 
 ---
 
 ## Risks
 
-_To be completed._
+**Minor — MDX/Mintlify component syntax in source documents**
+Some documentation sources (e.g. Anthropic's docs, built with Mintlify) use JSX components embedded in markdown: `<section title="...">` as a section grouping construct and `<CodeGroup>` as a tabbed code block wrapper. markdown-it-py parses these as flat `html_block` tokens with no structural awareness. A splitter operating on standard markdown would treat them as opaque blobs, missing valid split boundaries and potentially producing oversized chunks. Mitigation: normalize at ingestion time (see Prototypes). The splitter itself sees only standard markdown and requires no changes.
 
 ---
 
 ## Prototypes
 
-_To be completed._
+**MDX preprocessor** — Convert Mintlify/MDX component syntax to standard markdown before ingestion. Belongs in the document download/ingestion tool, not the splitter. Approach: parse source with markdown-it-py to get a token stream; walk tokens tracking heading depth; replace `html_block` tokens matching `<section title="...">` with synthetic heading tokens at depth+1; discard `<CodeGroup>`, `</CodeGroup>`, `</section>` wrapper tokens; reconstruct output using `token.map` line ranges against original source. This prototype becomes the production preprocessor — it is not throwaway. Primary test case: `doc/anthropic/build-with-claude/prompt-caching/prompt-caching-examples.md` (14k tokens, 4 sections, 3 CodeGroups).
 
 ---
 
@@ -110,7 +113,13 @@ _To be completed._
 
 ## Tests
 
-_To be completed._
+Five documents run through `fit_split.py`; results recorded, failure modes identified, "strictly better" criteria defined.
+
+Primary failures: no recursion (six subdocs over 3k, four over 8k); code block blindness (prompt-caching-examples.md at 14,343 tokens); unnecessary split of a sub-target document (tool-use/overview.md at 2,137 tokens). Two documents produced clean output and serve as regression checks.
+
+Additional test document candidates: `doc/anthropic/skills/skills/claude-api/shared/live-sources.md` (~4k tokens, do not load in full — extract URLs and download selectively as needed).
+
+→ [001_basic_mechanical/tests.md](001_basic_mechanical/tests.md) (~1244 tokens)
 
 ---
 
