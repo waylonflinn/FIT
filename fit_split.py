@@ -112,7 +112,7 @@ def main():
 
     backup_path = os.path.join(source_dir, source_name + ".orig.md")
     shutil.copy2(source_path, backup_path)
-    print(f"Backup: {backup_path}")
+    print(f"Backup: {backup_path} (~{len(content)//4} tokens)")
 
     sub_dir = os.path.join(source_dir, source_name)
 
@@ -139,7 +139,7 @@ def main():
         if preamble_is_trivial:
             root_parts.append(preamble_text)
             root_parts.append("")
-            print(f"  inline: (preamble) ({len(preamble_text)})")
+            print(f"  inline: (preamble) (~{len(preamble_text)//4} tokens)")
         else:
             sub_filename = "introduction.md"
             sub_path = os.path.join(sub_dir, sub_filename)
@@ -155,7 +155,7 @@ def main():
 
             with open(sub_path, "w") as f:
                 f.write(preamble_text + "\n")
-            print(f"  sub:  {sub_path} ({len(preamble_text)})")
+            print(f"  sub:  {sub_path} (~{token_estimate} tokens)")
 
     if not sections:
         print("No H2 sections found — nothing left to split.")
@@ -177,7 +177,7 @@ def main():
             # Inline the full body — no sub-doc needed
             root_parts.append(body_stripped)
             root_parts.append("")
-            print(f"  inline: {heading} ({len(body_stripped)})")
+            print(f"  inline: {heading} (~{len(body_stripped)//4} tokens)")
         else:
             if first_para:
                 root_parts.append(first_para)
@@ -189,13 +189,14 @@ def main():
             sub_content = f"## {heading}\n\n{body_stripped}\n"
             with open(sub_path, "w") as f:
                 f.write(sub_content)
-            print(f"  sub:  {sub_path} ({len(body_stripped)})")
+            print(f"  sub:  {sub_path}  (~{token_estimate} tokens)")
 
     # Write root doc (overwrites source)
     root_content = "\n".join(root_parts).strip() + "\n"
     with open(source_path, "w") as f:
         f.write(root_content)
-    print(f"  root: {source_path}")
+    token_estimate = len(root_content) // 4
+    print(f"  root: {source_path} (~{token_estimate} tokens)")
     print(f"Done. {len(sections)} sections split.")
 
 
