@@ -42,3 +42,15 @@ Waylon provided additional design intent that materially changes two of the orig
 - Novelty: 5/10 (up from 4 — JIT + attention position angle earns it)
 - Utility: 6/10 (unchanged — niche concern remains)
 - Power to enable agent capability: 7.5/10 (up from 6 — continuous chain framing is substantive; empirical unknowns remain)
+
+---
+
+## Second Rebuttal: FIT as RAG Supplement (April 12, 2026)
+
+FIT also improves RAG retrieval quality indirectly — not by replacing it, but by improving the corpus it operates on. A FIT-structured document produces better retrieval chunks: the root node is a coherent overview rather than an arbitrary paragraph; subdocuments are topically clean rather than fragments of sprawling prose. A retrieval hit on a FIT node is more likely to be self-contained and useful than a hit on a naive chunk of flat text.
+
+The relationship is complementary, not competitive. FIT is an organizing force that makes whatever retrieval system sits on top of it work better.
+
+**Caveat:** The benefit depends on the RAG system treating document nodes as retrieval units rather than slicing across them by fixed token count. A naive chunker can fragment the tree structure and lose much of the gain. Our own memory system currently chunks by token count, so the degree of benefit in practice is an open question.
+
+**Revised utility: 7/10** (up from 6). This widens the applicable surface from "filesystem-native agent navigation" to "any agent with a memory system," which is broader than originally assessed. The indirect nature of the benefit and the chunking dependency keep it from going higher.
