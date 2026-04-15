@@ -16,7 +16,7 @@ _Updated: 2026-04-10_
 
 ## Goal
 
-A command-line Python script that converts an arbitrarily large markdown document into a Fitted Information Tree (FIT): a root document (≤3k tokens) linking to subdocuments (≤3k tokens each), recursively, until the entire tree satisfies the size constraints. The script must handle the full range of real-world markdown structure — headings, code blocks, ruled lines, paragraphs, sentences — and produce output that is strictly better than the existing `fit_split.py` in every case.
+A command-line Python script that converts an arbitrarily large markdown document into a Fitted Information Tree (FIT): a root document (≤3k tokens) linking to subdocuments (≤3k tokens each), recursively, until the entire tree satisfies the size constraints. The script must handle the full range of real-world markdown structure — headings, code blocks, ruled lines, paragraphs, sentences — and produce output that is strictly better than the existing `fit_split.py` in every case. It is intended to be an implementation of Level 1.5.
 
 ---
 
@@ -88,7 +88,7 @@ The goal statement holds. No revisions needed.
 
 Initial component proposal: Driver Loop, process_file, Measurer, Heading Detector, Splitter, Code Block Handler, Name Generator, Writer. Open question: where the inline vs. subdoc decision lives (Splitter vs. Writer).
 
-→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~1157 tokens)
+→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~1380 tokens)
 
 ---
 

@@ -3,48 +3,53 @@
 ## Functional Requirements
 
 **Size constraints (enforced, not advisory):**
-- All documents (root and subdocuments): ≤3k tokens (hard target; configurable)
-- Target is 3k tokens; hard ceiling is 5k. Documents between 3k–5k are acceptable only when further splitting would lose more than it gains (e.g., breaking a code block mid-statement).
+- Soft Threshold: 3k tokens (target; configurable). Root documents are measured against this first; subdocuments that exceed it trigger further splitting.
+- Hard Threshold: 5k tokens (ceiling; configurable). Documents exceeding this after all reduction steps emit an additional warning.
 - Token count estimated at ~4 chars/token throughout
 
 **Recursive processing:**
-- The split process applies recursively — subdocuments that exceed the size target are themselves split
-- Recursion bottoms out when all output documents are within the size target, or no further split is possible
+- The split process applies recursively — subdocuments that exceed the Soft Threshold are themselves split
+- Recursion bottoms out when all output documents are within the Soft Threshold, or no further split is possible
+- Root document: exits (no write) if below Soft Threshold; exits with warning if no segmentation target found
+- Recursive documents: skipped (no write) if below Soft Threshold
 
-**Heading detection:**
-- Scan each document to find which heading level has multiple occurrences (configurable threshold, default: 2)
-- Search order: H1 → H2 → H3 → H4 → H5 → H6
-- If a heading level has only one occurrence, inline it and continue scanning the next level down; "inline" means kept in the parent when the content fits — a single heading whose content exceeds the target is split at the next available boundary
-- Use the first heading level with ≥ threshold occurrences as the split boundary
-- Each subdocument rescans for headings starting fresh from H1
+**Heading detection and segmentation target:**
+- Segmentation target: the lowest heading level (H1–H6) or ruled line such that the count of all headings at and above that level is ≥ Minimum Segmentation Element Count (default: 3)
+- Search order: H1 → H2 → H3 → H4 → H5 → H6 → ruled lines
+- All headings above the segmentation target also produce their own segments (non-overlapping)
+- If no level meets the minimum count before exhausting all heading levels, use the lowest level found; emit a warning
+- If no headings or rules exist: emit a warning and leave the document as-is (block-level splitting is a future extension)
+- Each subdocument rescans from H1
 
-**Split hierarchy (when no usable headings exist):**
-1. Ruled lines (`---`, `***`, `___`)
-2. Code blocks (fenced: ` ``` ` or `~~~`)
-3. Paragraphs (blank-line-separated)
-4. Sentences (period/question/exclamation boundaries)
-5. Words (whitespace boundaries)
-6. If no words: do not split; emit a warning
+**Inline vs. subdoc classification (base segmentation):**
+A segment is initially inlined if either condition holds (OR):
+- **Threshold condition:** total token count < Inline Threshold (default: 600)
+- **Trivial extension condition:** the segment consists of a single paragraph, plus any additional content within Trivial Extension Threshold tokens (default: 25) of that paragraph's length — i.e. `len(body) <= len(first_para) + trivial_extension_threshold`
 
-**Document content (uniform at all levels, including root):**
-- For each child section extracted to a subdoc: include heading + lead-in in the parent document, followed by the subdoc link with token annotation
-- Lead-in: first prose paragraph following the heading (excluding code blocks, lists, and other non-prose block elements)
-- Lead-in truncation: if the combined entry (heading + lead-in + token annotation) would push the parent document over the target, truncate the lead-in to its first sentence
-- Inline sections that fit within the target rather than linking to a subdoc
-- Every link to a subdoc includes a parenthetical token estimate: `(~N tokens)`
+These are two independent inlining mechanisms. Either alone is sufficient. Inline segments are kept fully intact through all reduction steps until step 3 begins converting them to subdocs by reducing the Inline Threshold.
 
-**Code block handling:**
-- When splitting on code blocks: include any preceding free-text paragraph in the same chunk as the code block
-- Attempt language identification from the fenced code block info string (e.g. ` ```python `)
-- For unannotated blocks: label as `"Code"` and exclude from inline preference — language detection libraries are not used at runtime (see Research for prototype results and rationale)
-- Supported languages for inline preference: `python`, `javascript`, `typescript`, `rust`, `c`, `c++` (configurable)
-- Inline up to a configurable number of code blocks in a preferred language (default: 2) rather than splitting them out. If preferred language code blocks must be dropped, lowest priority will be dropped first.
-- Overflow: if a paragraph + code block together exceed the target, the code block becomes its own subdoc and the paragraph becomes the lead-in for that subdoc link in the parent; if the code block alone exceeds the target, it becomes its own subdoc with a warning
-- When a synthetic subdoc is created from a code block, generate a name from context:
-  - Use the preceding heading, when available
-  - When reliable language information is available, fall back to language tags with numbered suffix (e.g. `python-01`); when only one block for a given language appears, drop the numbering (e.g. `python`)
-  - When no reliable language information is available, fall back to `code` with numbered suffix (e.g. `code-01`)
-- Subdoc names for non-heading splits: ordered numbered filenames (e.g. `part-01.md`, `part-02.md`)
+Subdoc segments: everything not initially inlined. The inline component in the root doc starts with the first prose paragraph plus all priority code blocks in priority order.
+
+**Reduction loop — inline component of subdoc segments:**
+The root doc is measured after each step; reduction stops when the measure condition is satisfied. Steps are applied in order; settings are consistent across all non-inline segments at each step.
+1. Prune to first paragraph + all priority code blocks (measure: Soft Threshold; inline segments intact)
+2. Prune code blocks one at a time (lowest priority first) until one remains (measure: Soft Threshold; inline segments intact)
+3. Reduce Inline Threshold by Inline Threshold Reduction Increment; segments newly above threshold become subdocs at Minimum Target (measure: Soft Threshold)
+4. Repeat step 3 until Inline Threshold = 0; set Trivial Extension Threshold = 0; switch measure condition to Hard Threshold
+5. Prune last remaining code block (measure: Hard Threshold)
+6. Prune inline component to first paragraph (measure: Hard Threshold)
+7. Prune inline component to subdoc link only; warn if still over Hard Threshold
+- Minimum Target: one paragraph + one code block (highest priority). Soft Threshold may be exceeded to maintain Minimum Target. At Minimum Target, measurement switches to Hard Threshold.
+- If the final root doc exceeds Soft Threshold: emit a warning. If it exceeds Hard Threshold: emit an additional warning.
+
+**Code block priority ordering:**
+- Priority is defined by language, in order: `python`, `javascript`, `typescript` (configurable via `--inline-languages`)
+- Within a priority tier, document order is used
+- Unannotated blocks (labelled `"Code"`) are lowest priority
+- Language identification: normalize fenced code block info strings via `pygments.get_lexer_by_name`; unannotated blocks labelled `"Code"`
+
+**Token count annotation:**
+- All subdoc links at every level include `(~N tokens)` based on the subdoc's actual content length ÷ 4
 
 **Token count annotation:**
 - All subdoc links at every level include `(~N tokens)` based on the subdoc's actual content length ÷ 4
@@ -52,7 +57,7 @@
 **Output structure:**
 - Rewrites the source file in place as the root document
 - Creates a subdirectory named after the source file (lowercased, no extension) for subdocuments
-- Backs up the original file before any writes, using `.orig` between filename and extension (e.g. `document.orig.md`)
+- Backs up the original file before any writes, using `.unfit` between filename and extension (e.g. `document.unfit.md`)
 
 ## Configuration
 
@@ -60,10 +65,13 @@ All configurable values have uppercase constants at the top of the script as def
 
 | Option | Default | Description |
 |---|---|---|
-| `--max-tokens` | 3000 | Maximum tokens for any document (root or subdocument) |
-| `--split-threshold` | 2 | Minimum heading occurrences to trigger split |
-| `--inline-languages` | `python,javascript,typescript` | Comma-separated preferred languages to inline, in priority order |
-| `--inline-max` | 2 | Max code blocks of preferred language to inline |
+| `--soft-threshold` | 3000 | Soft token target; triggers splitting and reduction loop |
+| `--hard-threshold` | 5000 | Hard token ceiling; triggers additional warnings and below-minimum pruning |
+| `--inline-threshold` | 600 | Segments below this token count are inlined in full |
+| `--inline-threshold-reduction-increment` | 100 | Amount Inline Threshold is reduced per step 3/4 iteration |
+| `--trivial-extension-threshold` | 25 | Single-paragraph segments are inlined if their total length is within this many tokens of that paragraph's own length (i.e. they contain little beyond the paragraph) |
+| `--min-segment-count` | 3 | Minimum number of segments required to use a given heading level as segmentation target |
+| `--inline-languages` | `python,javascript,typescript` | Comma-separated preferred languages for code block priority, in order |
 | `--dry-run` | false | Print what would happen without writing files |
 
 ## Constraints and Scope
