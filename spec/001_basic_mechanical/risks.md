@@ -16,27 +16,19 @@ The annotation is `measurer.measure(body)`, not `_cached_tokens`. `body` is immu
 
 ---
 
-**R3. Paired/nested block tokens — what is a "block"?**
+**R3. Paired/nested block tokens — what is a "block"?** ✅ Resolved
 
-`Document._parse_segment` splits a body string into "an ordered list of blocks." markdown-it-py returns paired open/close tokens for lists (`bullet_list_open`/`close`, `list_item_open`/`close`), blockquotes (`blockquote_open`/`close`), and tables. These are not atomic. The question of how to group them into blocks is unspecified.
-
-Options:
-- Treat each top-level paired structure as one block (list → one block, blockquote → one block)
-- Flatten to inline content and treat each paragraph-level leaf as a block
-
-The reduction algorithm operates on blocks. If a blockquote containing three paragraphs is one block, it gets removed as a unit. If it's three blocks, they get removed individually. These produce different output. This decision is load-bearing and currently unspecified.
-
-*Smallest test:* run `_parse_segment` on a body containing a bullet list and inspect the returned block list. Make the decision explicit in the design.
+Top-level paired token groups (lists, blockquotes, tables) are treated as a single block from open to matching close; nesting depth is tracked to find the correct close. Nested content is not surfaced separately. Blocks are removed as atomic units during reduction. Definition added to `_parse_segment` in `design.md`. Prototype no longer needed.
 
 ---
 
-**R4. `pygments.get_lexer_by_name` failure modes**
+**R4. `pygments.get_lexer_by_name` failure modes** ✅ Resolved
 
-Info strings in real-world documents include: `python3`, `py`, `js`, `tsx`, `sh`, `bash`, `console`, `output`, `text`, `diff`, `patch`, `yaml`, `json5`, `http`. Some of these have `pygments` aliases; many don't. The design says unknown info strings should be labelled `"Code"` (same as unannotated) — but this isn't stated in the design doc, only implied by requirements.
+`try/except ClassNotFound` is the correct pattern and works as expected. Prototype at `forge/fit/prototypes/pygments_fallback/pygments_fallback.py` tested 18 info strings including all the suspected unknowns.
 
-More critically: `get_lexer_by_name` raises `ClassNotFound` for unknown strings. If this exception isn't caught, it's a crash on any document with an unusual language tag. The fallback behavior needs an explicit try/except and should be tested against a real corpus.
+Key finding: pygments knows more strings than expected — `output`, `console`, `text`, `diff`, `http` all resolve to real lexers. Only `patch` triggers `ClassNotFound` in this corpus. The fallback is still necessary (`patch` proves it), but fires rarely. Empty/whitespace strings are handled by a pre-check before `get_lexer_by_name` is called.
 
-*Smallest test:* pass `"output"`, `"console"`, `"text"`, `"diff"` through `get_lexer_by_name` and verify the exception handling path produces `"Code"`.
+`get_lexer_by_name` is also case-insensitive (`PYTHON` → Python). No crashes on any input tested.
 
 ---
 
@@ -48,11 +40,11 @@ All thresholds, including `trivial_extension_threshold`, are in tokens. The inli
 
 ---
 
-**R6. DriverLoop infinite loop on unsplittable oversized files**
+**R6. DriverLoop infinite loop on unsplittable oversized files** ✅ Resolved
 
-When `process_file` exhausts all reduction steps and the document still exceeds Soft Threshold, it writes link-only output and warns. The DriverLoop enqueues outputs that exceed Soft Threshold — but this file is above the threshold and `is_unsplittable` is `False` (it has headings and segments). So it gets re-queued. `process_file` runs again. Finds all segments already empty. Writes link-only again. Re-queued again. Infinite loop.
+The scenario as written was incorrect — `process_file` reads from disk, so re-queued subdoc files always have full original content, not the emptied in-memory state. The real question is whether recursion terminates at all.
 
-The DriverLoop needs a visited-paths set, or `process_file` needs a signal to the loop that re-processing would be futile. This isn't addressed in the design.
+It does: each split produces N ≥ `min_segment_count` pieces strictly smaller than the parent, bounded below by zero. `is_unsplittable` provides the base case. The only crack is `--min-segment-count 1`, which allows a document to produce one segment equal in size to itself and recurse infinitely. Fixed by enforcing a minimum value of 2 at startup. Design updated, config table updated.
 
 ---
 
@@ -62,16 +54,13 @@ DriverLoop enqueues all returned paths unconditionally. The coarse initial gate 
 
 ---
 
-**R8. markdown-it-py line map fidelity for all block types**
+**R8. markdown-it-py line map fidelity for all block types** ✅ Resolved
 
-The design relies on `token.map` to slice original source. This is documented for block-level tokens, but:
-- Inline tokens (the content inside paragraphs) don't have maps
-- HTML blocks: `html_block` tokens do have maps, but the content is opaque
-- Tight vs. loose lists behave differently in the token stream
+`token.map` is present and correct for all top-level block types tested (heading, paragraph, html_block, blockquote, bullet_list, fence). Inline tokens are not yielded at the top level and don't need maps.
 
-The assumption that "slice by line map = original bytes" needs to be verified, particularly for documents with Windows-style line endings or trailing whitespace that the parser may normalize.
+Key finding: inter-block blank lines live in the gaps *between* token map ranges — not inside any token's range. Naive `lines[start:end]` slicing loses these. The fix is `lines[start:next_start]` (extending each block's slice to where the next block begins, or EOF for the last block). This absorbs the gap into the preceding block and gives byte-identical reconstruction.
 
-*Smallest test:* parse a document containing a bullet list, a blockquote, an HTML comment, and a fenced code block; verify that concatenating all top-level block slices reconstructs the original exactly.
+Constraint: block text must never be `strip()`ed or otherwise trimmed after slicing — the trailing `\n` is load-bearing for the `next_start` scheme. Prototype: `forge/fit/prototypes/line_map/line_map.py`.
 
 ---
 

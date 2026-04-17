@@ -61,7 +61,7 @@ All configurable values have uppercase constants at the top of the script as def
 | `--inline-threshold` | 600 | Segments below this token count are inlined in full |
 | `--inline-threshold-reduction-increment` | 100 | Amount Inline Threshold is reduced per step 3/4 iteration |
 | `--trivial-extension-threshold` | 25 | Single-paragraph segments are inlined if their total length is within this many tokens of that paragraph's own length (i.e. they contain little beyond the paragraph) |
-| `--min-segment-count` | 3 | Minimum number of segments required to use a given heading level as segmentation target |
+| `--min-segment-count` | 3 | Minimum number of segments required to use a given heading level as segmentation target. Minimum value: 2 (enforced at startup; a value of 1 would allow infinite recursion) |
 | `--inline-languages` | `python,javascript,typescript` | Comma-separated preferred languages for code block priority, in order |
 | `--dry-run` | false | Print what would happen without writing files |
 

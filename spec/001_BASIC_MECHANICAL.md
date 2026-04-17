@@ -30,7 +30,7 @@ A command-line Python script that converts an arbitrarily large markdown documen
 | `--inline-threshold` | 600 | Segments below this token count are inlined in full |
 | `--inline-threshold-reduction-increment` | 100 | Amount Inline Threshold is reduced per step 3/4 iteration |
 | `--trivial-extension-threshold` | 25 | Single-paragraph segments are inlined if their total length is within this many tokens of that paragraph's own length (i.e. they contain little beyond the paragraph) |
-| `--min-segment-count` | 3 | Minimum number of segments required to use a given heading level as segmentation target |
+| `--min-segment-count` | 3 | Minimum number of segments required to use a given heading level as segmentation target. Minimum value: 2 (enforced at startup; a value of 1 would allow infinite recursion) |
 | `--inline-languages` | `python,javascript,typescript` | Comma-separated preferred languages for code block priority, in order |
 | `--dry-run` | false | Print what would happen without writing files |
 
@@ -116,6 +116,10 @@ Some documentation sources (e.g. Anthropic's docs, built with Mintlify) use JSX 
 ## Prototypes
 
 **MDX preprocessor** — Convert Mintlify/MDX component syntax to standard markdown before ingestion. Belongs in the document download/ingestion tool, not the splitter. Approach: parse source with markdown-it-py to get a token stream; walk tokens tracking heading depth; replace `html_block` tokens matching `<section title="...">` with synthetic heading tokens at depth+1; discard `<CodeGroup>`, `</CodeGroup>`, `</section>` wrapper tokens; reconstruct output using `token.map` line ranges against original source. This prototype becomes the production preprocessor — it is not throwaway. Primary test case: `doc/anthropic/build-with-claude/prompt-caching/prompt-caching-examples.md` (14k tokens, 4 sections, 3 CodeGroups).
+
+**`pygments` fallback** ✅ — `try/except ClassNotFound` confirmed working. Tested 18 info strings; `output`, `console`, `text`, `diff`, `http` all resolve to real lexers — only `patch` triggers `ClassNotFound`. Fallback is still necessary but fires rarely. Empty/whitespace handled by pre-check. Case-insensitive (`PYTHON` → Python). Prototype: `forge/fit/prototypes/pygments_fallback/pygments_fallback.py`. (R4)
+
+**Line map reconstruction** ✅ — `token.map` present and correct for all block types tested. Key finding: inter-block blank lines fall in gaps between token ranges. Fix: slice as `lines[start:next_start]` (extending to next block's start line, or EOF) — gives byte-identical reconstruction. Constraint: block text must never be stripped after slicing. `'\n'.join()` is not equivalent — fails on double blank lines. Prototype: `forge/fit/prototypes/line_map/line_map.py`. (R8)
 
 ---
 

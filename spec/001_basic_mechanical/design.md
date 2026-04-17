@@ -101,6 +101,10 @@ Calls `Document._parse(text, measurer, args)` internally and assigns the result.
 
 **`Document._parse_segment(body: str) -> list[str]`** — static method. Splits a segment body string into an ordered list of blocks. Extracted from `_parse` step 5 for reuse at the inline→subdoc demotion call site. All block types returned by the markdown parser are included; only code blocks receive special treatment elsewhere in the pipeline.
 
+**Block definition:** A block is a single top-level structural unit — one paragraph, one fenced code block, one list, one blockquote, one table, etc. Paired open/close token groups (lists, blockquotes, tables) are treated as one block from the top-level open to its matching close; nesting depth is tracked to find the correct close token. Nested content is not surfaced as separate blocks. Blocks are removed as atomic units during reduction.
+
+**Block slicing:** Blocks are extracted from source using `token.map = [start, end]` (0-indexed, end exclusive). Inter-block blank lines fall in the gap between adjacent token ranges and are not included in any block's map. To preserve them, each block is sliced as `lines[start:next_start]` where `next_start` is the start line of the following block (or EOF for the final block). This gives byte-identical reconstruction of the segment body. Block text must never be stripped or trimmed after slicing — the trailing newline is required for the `next_start` scheme to work correctly.
+
 **Interface:**
 
 - `__iter__` — yields `Segment` objects in document order
@@ -209,5 +213,7 @@ CLI args
 **Coarse initial gate:** The Measurer applied to the raw document text before `Document` construction has no knowledge of block boundaries — it treats the entire text as one string. This is intentional: the gate is cheap and catches documents that trivially fit. Accuracy improves as the pipeline progresses and block structure becomes known. The coarser estimate is applied to the coarser decision; the more precise estimate is applied as constraints tighten toward the Hard Threshold.
 
 **`is_critical_reduce` pre-scan:** Rather than detecting a critical reduction after the fact and restoring prior state, the scan detects the condition before mutation occurs. The `_had_paragraph` and `_had_code` flags prevent false positives from segments that never had both block types. The Hard Threshold switch is clean and one-way.
+
+**Recursion termination:** Each split partitions content into N ≥ `min_segment_count` pieces, each strictly smaller than the parent. Token counts are bounded below by zero, so any chain through the DriverLoop queue terminates. The `is_unsplittable` base case catches documents that cannot be split further. `min_segment_count` must be at least 2 — a value of 1 would allow a document to produce a single segment equal in size to itself, re-queue forever, and recurse infinitely. Enforced at startup.
 
 See `risks.md` for known design tensions and anticipated refactor pressure points.
