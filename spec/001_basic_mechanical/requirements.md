@@ -31,16 +31,7 @@ These are two independent inlining mechanisms. Either alone is sufficient. Inlin
 Subdoc segments: everything not initially inlined. The inline component in the root doc starts with the first prose paragraph plus all priority code blocks in priority order.
 
 **Reduction loop — inline component of subdoc segments:**
-The root doc is measured after each step; reduction stops when the measure condition is satisfied. Steps are applied in order; settings are consistent across all non-inline segments at each step.
-1. Prune to first paragraph + all priority code blocks (measure: Soft Threshold; inline segments intact)
-2. Prune code blocks one at a time (lowest priority first) until one remains (measure: Soft Threshold; inline segments intact)
-3. Reduce Inline Threshold by Inline Threshold Reduction Increment; segments newly above threshold become subdocs at Minimum Target (measure: Soft Threshold)
-4. Repeat step 3 until Inline Threshold = 0; set Trivial Extension Threshold = 0; switch measure condition to Hard Threshold
-5. Prune last remaining code block (measure: Hard Threshold)
-6. Prune inline component to first paragraph (measure: Hard Threshold)
-7. Prune inline component to subdoc link only; warn if still over Hard Threshold
-- Minimum Target: one paragraph + one code block (highest priority). Soft Threshold may be exceeded to maintain Minimum Target. At Minimum Target, measurement switches to Hard Threshold.
-- If the final root doc exceeds Soft Threshold: emit a warning. If it exceeds Hard Threshold: emit an additional warning.
+The document is measured after each reduction pass; reduction stops when satisfied. The loop progressively trims inline components of subdoc segments — removing lower-priority code blocks before higher-priority ones, and non-code content last. Inline segments remain intact until the Inline Threshold is reduced enough to demote them to subdoc status. Measurement is against the Soft Threshold until further reduction would remove the last remaining non-code or code block from any segment (detected via pre-scan); at that point measurement switches permanently to the Hard Threshold. If the final document still exceeds the Soft Threshold, emit a warning. If it exceeds the Hard Threshold, emit an additional warning. See design.md for the precise algorithm.
 
 **Code block priority ordering:**
 - Priority is defined by language, in order: `python`, `javascript`, `typescript` (configurable via `--inline-languages`)

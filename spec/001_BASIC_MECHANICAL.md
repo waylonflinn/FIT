@@ -4,13 +4,13 @@ _Effort: Involved (3)_
 
 _Capability: Design (3)_
 
-_Elapsed: ~1d_
+_Elapsed: ~3d_
 
 _Daily logs: Requirements/Synthesis/Research: 2026-04-09.md_
 
-_Status: Design (4/10)_
+_Status: Risk Analysis (5/10)_
 
-_Updated: 2026-04-10_
+_Updated: 2026-04-16_
 
 ---
 
@@ -74,28 +74,30 @@ The goal statement holds. No revisions needed.
 
 **Key findings:**
 - `markdown-it-py` (already installed): use as primary parser. Token stream includes `token.map = [start_line, end_line]` for all block tokens — use the AST for structure, line maps to slice original source faithfully (no round-trip rendering)
-- `pygments` (already installed): use `get_lexer_by_name` to normalize info strings; for unannotated blocks use `guess_lexer` with a confidence threshold (~0.5) — above threshold use the language name, below fall back to `"Code"`; threshold needs prototyping (flagged as risk)
+- `pygments` (already installed): use `get_lexer_by_name` to normalize info strings; unannotated blocks labelled `"Code"` — detection libraries evaluated and rejected (see research.md for rationale)
 - Sentence splitting: stdlib regex sufficient, no NLTK needed
 - No existing markdown splitter covers this use case — building fresh
 
 **Exemplar pattern (driver loop):** Unix single-file-at-a-time — `process_file(path)` returns paths of written subdocs; a driver loop feeds oversized outputs back in. BFS/DFS over paths on disk.
 
-→ [001_basic_mechanical/research.md](001_basic_mechanical/research.md) (~1539 tokens)
+→ [001_basic_mechanical/research.md](001_basic_mechanical/research.md) (~2,058 tokens)
 
 ---
 
 ## Design
 
-Initial component proposal: Driver Loop, process_file, Measurer, Heading Detector, Splitter, Code Block Handler, Name Generator, Writer. Open question: where the inline vs. subdoc decision lives (Splitter vs. Writer).
+Object-oriented design. Core classes: `Measurer`, `Segment`, `Document`, `Writer` (factory pattern). `process_file` is thin — constructs objects and hands off to the reduction loop and writer. `DriverLoop` manages BFS queue of file paths. Inline vs. subdoc classification lives in `Document._parse`; the reduction loop progressively demotes inline segments to subdoc as the Inline Threshold decrements.
 
-→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~1380 tokens)
+→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~3,452 tokens)
 
 ---
 
 ## Risks
 
-**Minor — MDX/Mintlify component syntax in source documents**
+**MDX/Mintlify component syntax in source documents**
 Some documentation sources (e.g. Anthropic's docs, built with Mintlify) use JSX components embedded in markdown: `<section title="...">` as a section grouping construct and `<CodeGroup>` as a tabbed code block wrapper. markdown-it-py parses these as flat `html_block` tokens with no structural awareness. A splitter operating on standard markdown would treat them as opaque blobs, missing valid split boundaries and potentially producing oversized chunks. Mitigation: normalize at ingestion time (see Prototypes). The splitter itself sees only standard markdown and requires no changes.
+
+→ [001_basic_mechanical/risks.md](001_basic_mechanical/risks.md) (~2,320 tokens)
 
 ---
 

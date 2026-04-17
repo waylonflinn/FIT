@@ -1,157 +1,178 @@
 # Design — FIT Generator: Basic Mechanical Split
 
-> ⚠️ **Revised design — supersedes initial proposal.**
+---
 
-## Core Data Structures
+## Class Overview
 
-**`measure_contents`** — `OrderedDict[str, str | list[str]]`
-- Key: segment name
-- Value: fully inlined body string (for inline segments) OR raw content blocks (for subdoc segments)
-
-**`subdoc_contents`** — `OrderedDict[str, str]`
-- Key: segment name
-- Value: full subdoc body (written to disk)
+```
+Measurer
+  └─► Segment (injected via Document constructor)
+        └─► Document (owns list of Segments)
+              └─► process_file (external; iterates Document)
+                    └─► Writer (factory-created)
+                          └─► DriverLoop (queue of paths)
+```
 
 ---
 
-## Major Components
-
-### Driver Loop
-
-Maintains a queue of file paths. Feeds each through `process_file`; any output path that exceeds Soft Threshold is placed on the queue. Runs until the queue is empty. BFS will produce more comprehensible intermediate filesystem state (useful if something breaks halfway through).
-
----
-
-### process_file(path, is_root=False) → list[Path]
-
-Core unit of work. Steps:
-1. Measure; if ≤ Soft Threshold, skip (log message) and return `[]`
-2. Find segmentation target (see Segmentation Target Finder)
-3. If root and no target found: warn and exit (no writes)
-4. Build base segmentation (see Base Segmentation)
-5. Run reduction loop (see Reduction Loop)
-6. Write output (see Writer)
-7. Return list of subdoc paths created
-
----
-
-### Segmentation Target Finder
-
-Scans the token stream for heading levels and ruled lines. Searches H1 → H2 → H3 → H4 → H5 → H6 → ruled lines. At each level, counts headings at that level plus all levels above. Returns the first level where that count ≥ `--min-segment-count`. If no level meets the threshold, returns the lowest level found (with warning). If no headings or rules exist: warns and returns `None`.
-
-All heading levels above and including the segmentation target produce distinct non-overlapping segments.
-
-Implementation Note: possible implementation, maintain counter of all encountered heading levels (including ruled lines) in stream. When a heading count is incremented sum over all elements in the counter and test.
-
----
-
-### Name Generator
-
-Produces keys for `measure_contents` and `subdoc_contents` (also used as filename stems for subdocs).
-
-- **Heading-derived:** slugify heading text (spaces and punctuation → `_`, collapse runs). If the result is empty (degenerate heading, e.g. bare `##`): use `heading_NN` where `NN` is the 1-based index of that heading among all headings in the document (zero-padded, minimum 2 digits).
-- **Ruled line:** `rule_NN` (same indexing scheme, among all rules).
-- **Duplicates:** suffix with zero-padded integer starting at `01` (minimum 2 digits, widen as needed).
-
----
-
-### Classifier (Code Detection)
-
-- `get_type(text: str) -> str` - 'code' | 'text' (detects markdown code blocks, three backticks at beginning and end after stripping)
-- `is_code(text: str) -> bool` - syntactic sugar for `get_type == 'code'`. used in `Measurer` and `reduce_segment`
-- `get_code_language(text: str) -> str` — `pygments.get_lexer_by_name(tag)` maps info strings to canonical names; unannotated blocks are `"code"`, non-code blocks are `None`
-
----
+## Core Classes
 
 ### Measurer
 
-- `measure_document(measure_contents: OrderedDict) -> int` - total size of the root document as it would be rendered (concatenation of all inline bodies + all subdoc inline components + link annotations) by applying `measure_segment` to each subdoc segment and `measure_block` to each inline segment
-- `measure_segment(segment: list[str]) -> int` - sums over calls to `measure_block` on each block, plus separate measure_block calls for the heading and link (variable length — not in the block list)"
-- `measure_block(block: string) -> int` - can be used on blocks and inline segment text; detects code blocks
-  - `chars ÷ 4` for text and blocks of unknown type
-  - `chars ÷ 3.5` for code blocks
+Single responsibility: estimate token count from a string.
 
-Used constantly throughout the pipeline. Worth isolating so the estimation logic lives in exactly one place.
+- `measure(text: str) -> int` — detects code blocks internally.
+  - `chars ÷ 4` for text
+  - `chars ÷ 3.5` for code blocks (detected via three-backtick fence at start and end of string after stripping)
 
----
-
-### Segmenter (Base Segmentation Builder)
-Given the segmentation target partitions the document into segments.
-
-- `is_inline(text: str, inline_threshold: int) -> bool`
-  - either condition holds — (a) total token count < Inline Threshold, OR (b) `len(body) <= len(first_block) + trivial_extension_threshold` (single-block-plus-a-little). These are independent mechanisms; either is sufficient.
-- `segment(text: str) -> list[str]` return a list of blocks in document order
-  - Example: `[paragraph, code_block_highest_priority, paragraph, code_block_lowest_priority, ..., code_block_medium_priority, paragraph]`
-
-### Base Segmentation
-
-Populate `subdoc_contents` and initial `measure_contents` using segment keys from Name Generator
-
-For `measure_contents`:
-- **Inline segment:** `Segmenter.is_inline == True` Value: full body string.
-- **Subdoc segment:** everything else → value is a list of raw content blocks in document order (`Segmenter.segment`).
-  **Construction:** After segmenting, subdoc block lists are passed to `reduce_segment` (see below) with the `priority_languages` argument populated by `--inline-languages` and the current value of Inline Threshold.
-  **Measurement:**  sum of measure of all elements (plus heading and link annotation) → current inline component size.
-  **Empty list:**  inline component is link-only.
-
-For `subdoc_contents`: full subdoc body including heading or ruled line that partitions the segment
+Constants are class-level, making the estimation model swappable (e.g. replace with an exact tokenizer) without touching anything else. Injected into `Document`; `Document` passes it down to each `Segment`.
 
 ---
 
-### Reducer (Segment Reduction)
+### Segment
 
-- `reduce_segment(blocks: list[string], measurer: Measurer, threshold: int, priority_languages: list[str] = None) -> list[str]`
+The backbone of the design. Encapsulates a single named section of the document — its content, inline/subdoc state, cached token count, and reduction behavior.
 
-    - Return Value:
-        return the modified list when the Measurer returns a value below the `threshold`, if `threshold` is zero returns `[]`
-    - Algorithm:
-        - remove non-priority code blocks, one by one, in reverse document order, testing after each removal (scan from end of array, remove first found)
-        - trim priority code blocks, one by one, in reverse priority order, then reverse document order, until one of each priority type remains, testing after each removal. Example: if priority_languages=['python', 'typescript', 'json'], search backwards from end of array until you find a 'json' block, remove it; repeat with 'json' blocks until only one remains, then start trimming 'typescript' blocks until one remains, then 'python'.
-        - remove priority code blocks, one by one, in reverse priority order, until only the highest priority remains, testing after each removal
-        - remove non-code blocks, one by one, in reverse document order, until one non-code block remains, testing after each removal
-        - remove the final code block, test
-        - return an empty array
-    - Implementation Note: sum of measure should be used rather than measure of concatenation, both for optimization and improved measurement on code blocks.
-    - Example:
+**Construction:** `Segment(name, heading, body, blocks, measurer, is_inline)`
 
+- `name: str` — slug key, used as filename stem for subdocs. Heading-derived: spaces and punctuation → `_`, collapsed. Bare headings → `heading_NN` (1-based index, zero-padded min 2 digits). Ruled lines → `rule_NN`. Duplicates suffixed with zero-padded integer starting at `01`.
+- `heading: str` — raw heading or ruled line that partitions this segment (included verbatim in `body`)
+- `body: str` — full content for disk write (heading included); also used by inline segments for `measure()` and `serialize_inline_component()`
+- `blocks: list[str]` — raw content blocks in document order (for subdoc segments); empty for inline segments
+- `_cached_tokens: int` — cached sum of `measurer.measure()` over current blocks. Updated after each block removal in `reduce()`. Never recomputed from scratch except on `demote_to_subdoc()`.
+- `is_inline: bool` — True if segment body is rendered verbatim in the root doc; False if replaced by heading + inline component + subdoc link
+- `_had_paragraph: bool` — class-level flag set at construction. True if the original block list contained at least one non-code block. (Name uses "paragraph" loosely — means any non-code block.) Used by `is_critical_reduce()`.
+- `_had_code: bool` — class-level flag set at construction. True if the original block list contained at least one code block. Used by `is_critical_reduce()`.
 
-- `[paragraph, code_block_lowest_priority, paragraph, code_block_highest_priority, code_block, code_block_lowest_priority, paragraph]` →
-- `[paragraph, code_block_lowest_priority, paragraph, code_block_highest_priority, code_block_lowest_priority, paragraph]` →
-- `[paragraph, code_block_lowest_priority, paragraph, code_block_highest_priority, paragraph]` →
-- `[paragraph, paragraph, code_block_highest_priority, paragraph]` →
-- `[paragraph, paragraph, code_block_highest_priority]` →
-- `[paragraph, code_block_highest_priority]` 
+**Key methods:**
 
-Steps: (1) non-priority code block removed; (2–3) lowest-priority code block instances removed tail-first; (4–5) non-code blocks removed tail-first; result: one paragraph + highest-priority code block.
+- `measure() -> int` — returns `_cached_tokens` for subdoc segments; `measurer.measure(body)` for inline segments.
+
+- `is_critical_reduce(threshold: int) -> bool` — returns True if reducing at this threshold would result in no non-code blocks remaining (when `_had_paragraph` is True) or no code blocks remaining (when `_had_code` is True). Does not mutate state. The flags prevent false positives from segments that never had both block types. Returns True for zero-block segments when either flag is set — a segment already emptied is already past the critical point. `is_critical_reduce = (self._had_paragraph and no_noncoded_blocks_remain) or (self._had_code and no_code_blocks_remain)`. Used by the outer loop's scan pass to detect Hard Threshold conditions before mutation occurs.
+
+- `reduce(threshold: int, priority_languages: list[str] = None) -> int` — removes blocks per the priority algorithm, checking `_cached_tokens` against `threshold` after each removal and stopping as soon as the token count falls below `threshold`. Updates `_cached_tokens` after each removal. Returns `_cached_tokens`. Returns 0 (and sets blocks to `[]`) if threshold is zero.
+
+- `demote_to_subdoc(blocks: list[str])` — transitions an inline segment to subdoc status. Sets `is_inline = False`, sets `blocks`, recomputes `_cached_tokens` from scratch. Caller passes `Document._parse_segment(segment.body)` to produce the block list.
+
+- `serialize_inline_component() -> str` — returns the heading + inline component (current blocks joined) + subdoc link with `(~N tokens)` annotation, where N is `len(body) // 4`. Used by Writer to assemble the root document.
+
+**Block removal algorithm:**
+
+After each block removal, check `_cached_tokens` against `threshold`; stop and return as soon as the count falls below threshold. If the count never drops below threshold after exhausting all removal steps, return 0 and set blocks to `[]`.
+
+Removal steps in order:
+1. Remove non-priority code blocks in reverse document order
+2. Trim priority code blocks to one of each priority type, in reverse priority order then reverse document order (e.g. for `['python', 'typescript', 'json']`: trim `json` instances to one, then `typescript` to one, then `python` to one)
+3. Remove priority code blocks in reverse priority order until only the highest-priority type remains
+4. Remove non-code blocks in reverse document order until one non-code block remains
+5. Remove the final code block
+6. Set blocks to `[]`, return 0
+
 ---
+
+### Document
+
+Structured container for an ordered collection of Segments. Handles parsing, segmentation target detection, name generation, inline/subdoc classification, and the document-level `measure` cascade.
+
+**Construction:** `Document(text: str, measurer: Measurer, args)`
+
+Calls `Document._parse(text, measurer, args)` internally and assigns the result. `_parse` is a static method (Python's alternative to constructor overloading) that returns a list of `Segment` objects. It can be called independently for testing.
+
+**`Document._parse(text, measurer, args) -> list[Segment]`** — static method. Full parsing pipeline:
+
+1. **Segmentation Target:** Scan the token stream for heading levels (H1–H6) and ruled lines. Search in order H1 → H2 → H3 → H4 → H5 → H6 → ruled lines. At each level, count headings at that level plus all levels above. Return the first level where that count ≥ `args.min_segment_count`. If no level meets the threshold, use the lowest level found and warn. If no headings or rules exist: warn and return a single segment containing the full document (no split possible).
+
+2. **Segmentation:** Partition the document into segments at the target level (and all levels above it). Each heading at or above the target level begins a new segment. The content between two consecutive such headings (exclusive of the heading line itself) is the segment body.
+
+3. **Name generation:** For each segment, derive a name from its heading text (slug: spaces and punctuation → `_`, collapse runs). Bare headings (e.g. `##` with no text) → `heading_NN`. Ruled lines → `rule_NN`. Track duplicates across the document; suffix with zero-padded integer starting at `01` (widen as needed). The name generator is stateful per `_parse` call and resets between documents.
+
+4. **Inline/subdoc classification:** A segment is initially inline if either condition holds:
+   - Token count < `args.inline_threshold`
+   - `len(body) <= len(first_paragraph) + args.trivial_extension_threshold` (single paragraph plus a little)
+   Inline segments get `blocks=[]` and `is_inline=True`. Subdoc segments get their body split into blocks and `is_inline=False`.
+
+5. **Block splitting:** For subdoc segments, split the body into blocks using the markdown parser. All block types are included in document order; only code blocks receive special treatment in the reduction algorithm.
+
+6. **Initial subdoc reduction:** For each subdoc segment, call `segment.reduce(args.inline_threshold, args.inline_languages)` to trim the inline component below the Inline Threshold before the document-level reduction loop begins.
+
+7. **Construct and return** a list of `Segment` objects in document order, with `measurer` injected into each.
+
+**`Document._parse_segment(body: str) -> list[str]`** — static method. Splits a segment body string into an ordered list of blocks. Extracted from `_parse` step 5 for reuse at the inline→subdoc demotion call site. All block types returned by the markdown parser are included; only code blocks receive special treatment elsewhere in the pipeline.
+
+**Interface:**
+
+- `__iter__` — yields `Segment` objects in document order
+- `names` — property returning segment names in document order (for Writer and external consumers)
+- `measure() -> int` — sums `segment.measure()` across all segments, plus a per-subdoc-segment overhead for the inline component link line. The link line format follows the FIT standard: `[path/name.md](path/name.md) (~N tokens)` preceded by a heading; overhead is estimated at `len(link_line) // 4` tokens, computed once per segment from its name and path at construction time.
+- `is_satisfied(threshold: int) -> bool` — `self.measure() <= threshold`
+- `is_unsplittable` — property. Returns `True` if `_parse` produced exactly one segment (the no-headings fallback case). Used by `process_file` to skip the reduction loop and emit a warning instead of attempting reduction on an unsegmentable document.
+
+---
+
+### Writer (Factory Pattern)
+
+`WriterFactory.create(args) -> Writer` — returns a `Writer` or `DryRunWriter` based on `args.dry_run`.
+
+Both implement the same interface:
+
+- `write(document: Document, source_path: Path) -> list[Path]`
+  - **Backup:** writes `<filename>.unfit.<ext>` once before any output, at root level only
+  - **Root document:** assembled from `Document` iterator in order. Inline segments: body verbatim. Subdoc segments: `segment.serialize_inline_component()`.
+  - **Subdoc files:** written to `<source_stem>/` directory; content from `segment.body`
+  - Returns list of new subdoc paths created
+
+`DryRunWriter` — prints planned actions without writing. Independently testable.
+
+---
+
+## process_file and Reduction Loop
+
+`process_file` is thin: initial gate, construct objects, hand off to reduction loop and writer.
+
+```python
+def process_file(path, args, is_root=False):
+    text = path.read_text()
+    measurer = Measurer()
+
+    # Coarse initial gate — operates on raw unstructured text, intentionally
+    if measurer.measure(text) <= args.soft_threshold:
+        log("fits, skipping")
+        return []
+
+    doc = Document(text, measurer, args)  # parsing + base segmentation
+
+    if doc.is_unsplittable:
+        log("warning: no headings found, cannot split")
+        return []
+
+    writer = WriterFactory.create(args)
+    return _reduction_loop(doc, args, writer, path)
+```
 
 ### Reduction Loop
 
-Operates on `measure_contents`. Measures the total size of the root document by applying `Measurer.measure_document`. Applies reduction steps in order until the document level measure condition is satisfied, using `Reducer.reduce_segment`. Loop ends when the condition is satisfied or all segments are link only. If the link only state is reached and the document level measure condition is still not satisfied, a warning is printed.
+Lives outside `Document`. Outer loop decrements the Inline Threshold by `args.inline_threshold_reduction_increment` each iteration. Inside each iteration, two sequential passes over the Document iterator:
 
-**Base state:** all subdoc segments start with their constructed block list (measure trimmed below the Inline Threshold).
+**Pass 1 — Scan** (runs only while still on Soft Threshold):
+```
+for segment in doc:
+    if segment.is_critical_reduce(current_inline_threshold):
+        switch permanently to Hard Threshold
+        re-measure doc at new threshold
+        break
+```
+Once Hard Threshold is adopted, this scan is skipped for all subsequent iterations.
 
-Steps:
+**Pass 2 — Reduce:**
+```
+for segment in doc:
+    if not segment.is_inline:
+        segment.reduce(current_inline_threshold, args.inline_languages)
+```
 
-1. **Measure base state** — no removals yet; all blocks present. Measure against Soft Threshold. If satisfied, done. Inline segments untouched.
-2. **Reduce Inline Threshold by increment (loop)** — 
-  - Inlined segments whose string size now exceeds the reduced threshold convert to subdoc status and their `measure_contents` entry becomes a list of raw content blocks (`Segmenter.segment`).
-  - All subdoc segments (new and old) are then pruned with `Reducer.reduce_segment` using the new Inline Threshold.
-  - Resulting document is measured against Soft Threshold. 
-  - If any call to `reduce_segment` returns fewer than two blocks, immediately switch to Hard Threshold and retest at the previous Inline Threshold (before the decrement that resulted in less than two blocks). Hard Threshold is used for all remaining steps. (implementation note: this requires testing all segments with `reduce_segment` before modifying `measure_contents`. Caching of results from `reduce_segment` is optional)
-  - Terminate when the document is below the relevant threshold or all segments are link only (empty array)
-3. **Prune to link only** - if all calls to `reduce_segment` return empty arrays and the document still exceeds the Hard Threshold, write link-only and warn.
+After each full reduce pass: check `doc.is_satisfied(current_threshold)`. If satisfied, write and return. If all segments are link-only (empty block lists) and still unsatisfied, write link-only and warn.
 
----
-
-### Writer
-
-Takes `measure_contents` and `subdoc_contents` after the reduction loop; writes to disk.
-
-- **Root document:** assembled from segment entries in order. Inline segments: body verbatim. Subdoc segments: heading + inline component + subdoc link with `(~N tokens)` annotation.
-- **Subdoc files:** written to `<source_stem>/` directory; content from `subdoc_contents`.
-- **Backup:** `<filename>.unfit.<ext>` written once before any output, only at root level.
-- **Dry run:** print actions without writing.
+**Inline→subdoc demotion:** At the start of each outer iteration, before the scan and reduce passes, check all inline segments. Any inline segment whose body now exceeds the new (decremented) Inline Threshold is demoted: call `segment.demote_to_subdoc(Document._parse_segment(segment.body))` to split its body into blocks and mark it as subdoc.
 
 ---
 
@@ -159,13 +180,32 @@ Takes `measure_contents` and `subdoc_contents` after the reduction loop; writes 
 
 ```
 CLI args
-  └─► Driver Loop
-          └─► process_file(path, is_root)
-                  ├─► Measurer                    (fits? → done)
-                  ├─► Segmentation Target Finder  (→ target level or None)
-                  ├─► Name Generator              (→ keys for measure_contents and subdoc_contents, filenames for subdoc segments)
-                  ├─► Base Segmentation Builder   (→ measure_contents, subdoc_contents)
-                  ├─► Reduction Loop              (mutates measure_contents until measure satisfied)
-                  └─► Writer                      (→ root doc + subdoc files on disk)
-                          └─► new subdoc paths → Driver Loop queue
+  └─► DriverLoop (BFS queue of file paths)
+        └─► process_file(path, args, is_root)
+              ├─► Measurer.measure(text)         (coarse initial gate)
+              ├─► Document(text, measurer, args)
+              │     └─► Document._parse(...)
+              │           ├─► Segmentation Target detection
+              │           ├─► Name generation
+              │           ├─► Inline/subdoc classification
+              │           ├─► Block splitting
+              │           └─► Segment × N (measurer injected into each)
+              ├─► _reduction_loop(doc, args)
+              │     ├─► Inline→subdoc demotion check (each outer iteration)
+              │     ├─► Pass 1: segment.is_critical_reduce() → threshold switch
+              │     └─► Pass 2: segment.reduce() → _cached_tokens updated
+              └─► WriterFactory.create(args).write(doc, path)
+                    └─► new subdoc paths → DriverLoop queue
 ```
+
+**DriverLoop** maintains a BFS queue of file paths. Feeds each through `process_file`. Any output path that exceeds the Soft Threshold is placed back on the queue. Runs until the queue is empty. BFS produces more comprehensible intermediate filesystem state if something breaks halfway through.
+
+---
+
+## Design Notes
+
+**Coarse initial gate:** The Measurer applied to the raw document text before `Document` construction has no knowledge of block boundaries — it treats the entire text as one string. This is intentional: the gate is cheap and catches documents that trivially fit. Accuracy improves as the pipeline progresses and block structure becomes known. The coarser estimate is applied to the coarser decision; the more precise estimate is applied as constraints tighten toward the Hard Threshold.
+
+**`is_critical_reduce` pre-scan:** Rather than detecting a critical reduction after the fact and restoring prior state, the scan detects the condition before mutation occurs. The `_had_paragraph` and `_had_code` flags prevent false positives from segments that never had both block types. The Hard Threshold switch is clean and one-way.
+
+See `risks.md` for known design tensions and anticipated refactor pressure points.
