@@ -35,14 +35,14 @@ The backbone of the design. Encapsulates a single named section of the document 
 
 **Construction:** `Segment(name, heading, body, blocks, measurer, is_inline)`
 
-- `name: str` — slug key, used as filename stem for subdocs. Heading-derived: spaces and punctuation → `_`, collapsed. Bare headings → `heading_NN` (1-based index, zero-padded min 2 digits). Ruled lines → `rule_NN`. Duplicates suffixed with zero-padded integer starting at `01`.
+- `name: str` — slug key, used as filename stem for subdocs. Heading-derived: spaces and punctuation → `_`, collapsed. Any heading that slugifies to an empty string (bare headings, headings containing only punctuation, or similar) → `heading_NN` (1-based index, zero-padded min 2 digits). Ruled lines → `rule_NN`. Slugs are truncated to 200 bytes (UTF-8) to stay within filesystem filename limits. Duplicates suffixed with zero-padded integer starting at `01`.
 - `heading: str` — raw heading or ruled line that partitions this segment (included verbatim in `body`)
 - `body: str` — full content for disk write (heading included); also used by inline segments for `measure()` and `serialize_inline_component()`
 - `blocks: list[str]` — raw content blocks in document order (for subdoc segments); empty for inline segments
 - `_cached_tokens: int` — cached sum of `measurer.measure()` over current blocks. Updated after each block removal in `reduce()`. Never recomputed from scratch except on `demote_to_subdoc()`.
 - `is_inline: bool` — True if segment body is rendered verbatim in the root doc; False if replaced by heading + inline component + subdoc link
-- `_had_paragraph: bool` — class-level flag set at construction. True if the original block list contained at least one non-code block. (Name uses "paragraph" loosely — means any non-code block.) Used by `is_critical_reduce()`.
-- `_had_code: bool` — class-level flag set at construction. True if the original block list contained at least one code block. Used by `is_critical_reduce()`.
+- `_had_paragraph: bool` — class-level flag set at construction. True if the original block list contained at least one non-code block. (Name uses "paragraph" loosely — means any non-code block.) Reflects original document state, not current state after reduction. If the initial reduce (step 6 of `_parse`) removes all non-code blocks, this flag remains `True`; `is_critical_reduce` correctly fires, and Hard Threshold adoption at that point is intentional. Used by `is_critical_reduce()`.
+- `_had_code: bool` — class-level flag set at construction. True if the original block list contained at least one code block. Same semantics as `_had_paragraph`: reflects original state. Used by `is_critical_reduce()`.
 
 **Key methods:**
 
@@ -50,11 +50,13 @@ The backbone of the design. Encapsulates a single named section of the document 
 
 - `is_critical_reduce(threshold: int) -> bool` — returns True if reducing at this threshold would result in no non-code blocks remaining (when `_had_paragraph` is True) or no code blocks remaining (when `_had_code` is True). Does not mutate state. The flags prevent false positives from segments that never had both block types. Returns True for zero-block segments when either flag is set — a segment already emptied is already past the critical point. `is_critical_reduce = (self._had_paragraph and no_noncoded_blocks_remain) or (self._had_code and no_code_blocks_remain)`. Used by the outer loop's scan pass to detect Hard Threshold conditions before mutation occurs.
 
-- `reduce(threshold: int, priority_languages: list[str] = None) -> int` — removes blocks per the priority algorithm, checking `_cached_tokens` against `threshold` after each removal and stopping as soon as the token count falls below `threshold`. Updates `_cached_tokens` after each removal. Returns `_cached_tokens`. Returns 0 (and sets blocks to `[]`) if threshold is zero.
+- `is_empty: bool` — property. Returns `True` if `blocks` is empty. Used as a precondition check before `reduce()` in the outer loop to avoid redundant work.
+
+- `reduce(threshold: int, priority_languages: list[str] = None) -> int` — removes blocks per the priority algorithm, checking `_cached_tokens` against `threshold` after each removal and stopping as soon as the token count falls below `threshold`. Updates `_cached_tokens` after each removal. Returns `_cached_tokens`. Returns 0 (and sets blocks to `[]`) if threshold is zero. **No-op if already empty:** if `blocks` is already `[]`, returns 0 immediately without mutation.
 
 - `demote_to_subdoc(blocks: list[str])` — transitions an inline segment to subdoc status. Sets `is_inline = False`, sets `blocks`, recomputes `_cached_tokens` from scratch. Caller passes `Document._parse_segment(segment.body)` to produce the block list.
 
-- `serialize_inline_component() -> str` — returns the heading + inline component (current blocks joined) + subdoc link with `(~N tokens)` annotation, where N is `len(body) // 4`. Used by Writer to assemble the root document.
+- `serialize_inline_component() -> str` — returns the heading + inline component (current blocks joined) + subdoc link with `(~N tokens)` annotation, where N is `measurer.measure(body)`. `body` is immutable after construction, so this value is stable across the reduction loop. Used by Writer to assemble the root document.
 
 **Block removal algorithm:**
 
@@ -84,11 +86,11 @@ Calls `Document._parse(text, measurer, args)` internally and assigns the result.
 
 2. **Segmentation:** Partition the document into segments at the target level (and all levels above it). Each heading at or above the target level begins a new segment. The content between two consecutive such headings (exclusive of the heading line itself) is the segment body.
 
-3. **Name generation:** For each segment, derive a name from its heading text (slug: spaces and punctuation → `_`, collapse runs). Bare headings (e.g. `##` with no text) → `heading_NN`. Ruled lines → `rule_NN`. Track duplicates across the document; suffix with zero-padded integer starting at `01` (widen as needed). The name generator is stateful per `_parse` call and resets between documents.
+3. **Name generation:** For each segment, derive a name from its heading text (slug: spaces and punctuation → `_`, collapse runs; truncated to 200 bytes UTF-8). Any heading that slugifies to an empty string (bare headings, headings containing only punctuation, or similar) → `heading_NN` (1-based, zero-padded min 2 digits). Ruled lines → `rule_NN`. Track duplicates across the document; suffix with zero-padded integer starting at `01` (widen as needed). The name generator is stateful per `_parse` call and resets between documents.
 
 4. **Inline/subdoc classification:** A segment is initially inline if either condition holds:
    - Token count < `args.inline_threshold`
-   - `len(body) <= len(first_paragraph) + args.trivial_extension_threshold` (single paragraph plus a little)
+   - `measurer.measure(body) <= measurer.measure(first_paragraph) + args.trivial_extension_threshold` (single paragraph plus a little; all values in tokens)
    Inline segments get `blocks=[]` and `is_inline=True`. Subdoc segments get their body split into blocks and `is_inline=False`.
 
 5. **Block splitting:** For subdoc segments, split the body into blocks using the markdown parser. All block types are included in document order; only code blocks receive special treatment in the reduction algorithm.
@@ -103,9 +105,9 @@ Calls `Document._parse(text, measurer, args)` internally and assigns the result.
 
 - `__iter__` — yields `Segment` objects in document order
 - `names` — property returning segment names in document order (for Writer and external consumers)
-- `measure() -> int` — sums `segment.measure()` across all segments, plus a per-subdoc-segment overhead for the inline component link line. The link line format follows the FIT standard: `[path/name.md](path/name.md) (~N tokens)` preceded by a heading; overhead is estimated at `len(link_line) // 4` tokens, computed once per segment from its name and path at construction time.
+- `measure() -> int` — sums `segment.measure()` across all segments, plus a per-subdoc-segment overhead for the inline component link line. The link line format follows the FIT standard: `[path/name.md](path/name.md) (~N tokens)` preceded by a heading; overhead is estimated via `measurer.measure(link_line)`, computed once per segment from its name and path at construction time. `body` is immutable, so the annotation value (derived from `measurer.measure(body)`) is stable; the overhead does not change across reduction iterations.
 - `is_satisfied(threshold: int) -> bool` — `self.measure() <= threshold`
-- `is_unsplittable` — property. Returns `True` if `_parse` produced exactly one segment (the no-headings fallback case). Used by `process_file` to skip the reduction loop and emit a warning instead of attempting reduction on an unsegmentable document.
+- `is_unsplittable` — property. Returns `True` if the number of segments produced by `_parse` is less than `args.min_segment_count`. Covers both the no-headings case (zero or one segment, no valid split point found) and the degenerate case where the document has headings but too few to satisfy the minimum. Used by `process_file` to skip the reduction loop and emit a warning instead of attempting reduction on an unsegmentable document.
 
 ---
 
@@ -142,7 +144,7 @@ def process_file(path, args, is_root=False):
     doc = Document(text, measurer, args)  # parsing + base segmentation
 
     if doc.is_unsplittable:
-        log("warning: no headings found, cannot split")
+        log("warning: too few segments to split (check for headings or decrease min_segment_count)")
         return []
 
     writer = WriterFactory.create(args)
@@ -166,7 +168,7 @@ Once Hard Threshold is adopted, this scan is skipped for all subsequent iteratio
 **Pass 2 — Reduce:**
 ```
 for segment in doc:
-    if not segment.is_inline:
+    if not segment.is_inline and not segment.is_empty:
         segment.reduce(current_inline_threshold, args.inline_languages)
 ```
 
@@ -198,7 +200,7 @@ CLI args
                     └─► new subdoc paths → DriverLoop queue
 ```
 
-**DriverLoop** maintains a BFS queue of file paths. Feeds each through `process_file`. Any output path that exceeds the Soft Threshold is placed back on the queue. Runs until the queue is empty. BFS produces more comprehensible intermediate filesystem state if something breaks halfway through.
+**DriverLoop** maintains a BFS queue of file paths. Feeds each through `process_file`. All returned output paths are placed back on the queue unconditionally — the coarse initial gate in `process_file` handles filtering of files that already fit. Runs until the queue is empty. BFS produces more comprehensible intermediate filesystem state if something breaks halfway through.
 
 ---
 

@@ -4,25 +4,15 @@
 
 ## High Risk — Load-bearing assumptions that haven't been verified
 
-**R1. `_had_paragraph`/`_had_code` flags go stale after `_parse` initial reduction**
+**R1. `_had_paragraph`/`_had_code` flags go stale after `_parse` initial reduction** ✅ Resolved
 
-`_parse` step 6 calls `segment.reduce(inline_threshold)` *after* constructing each subdoc segment. The flags are set at construction from the full block list. If the initial reduce removes all non-code blocks from a segment, `_had_paragraph` is still `True`. Then on the reduction loop's first scan pass, `is_critical_reduce` checks "are there no non-code blocks remaining?" — there aren't (already removed) — so it returns `True` immediately and switches permanently to Hard Threshold before the loop has done anything. False positive, unnecessary Hard Threshold adoption.
-
-*Smallest test that resolves it:* a document where a subdoc segment has only one non-code block and `inline_threshold` is high enough that the initial reduce removes it. Verify `is_critical_reduce` behavior before and after `_parse`.
-
-*Fix candidate:* `_had_paragraph`/`_had_code` need to reflect current state, not original. Either set them after the initial reduce, or compute them lazily from the current block list.
+Flags are intentionally set at construction from the original block list and do not update after the initial reduce. If the initial reduce (step 6 of `_parse`) removes all non-code blocks, `_had_paragraph` remains `True` and `is_critical_reduce` correctly fires — Hard Threshold adoption at that point is the intended behavior. Design clarified in `design.md`.
 
 ---
 
-**R2. `Document.measure()` link overhead is dynamic, not static**
+**R2. `Document.measure()` link overhead is dynamic, not static** ✅ Resolved
 
-The design says overhead is "computed once per segment from its name and path at construction time." But the link line is `[path/name.md](path/name.md) (~N tokens)` — and `N` is the subdoc token count, which changes throughout reduction. The static part (name, path) is fixed; the annotation isn't. Either:
-- The annotation is computed from `segment.body` length (fixed — `body` never changes), making it a reasonable approximation that's stable, or
-- It reflects `_cached_tokens` (accurate but changes each reduction step)
-
-Which one is intended? If it's `len(body) // 4` (the `serialize_inline_component` formula), then the overhead is actually stable and the design is fine — but it should say that explicitly, not "computed from name and path."
-
-*Smallest test:* measure two identical documents where one subdoc has had blocks removed. Verify `Document.measure()` changes vs. stays the same.
+The annotation is `measurer.measure(body)`, not `_cached_tokens`. `body` is immutable after construction, so the overhead is stable across the reduction loop. The design now says this explicitly and uses `measurer.measure()` throughout (not `len() // 4`). Design clarified in `design.md`.
 
 ---
 
@@ -52,9 +42,9 @@ More critically: `get_lexer_by_name` raises `ClassNotFound` for unknown strings.
 
 ## Medium Risk — Fiddly bits requiring care
 
-**R5. `trivial_extension_threshold` units are ambiguous**
+**R5. `trivial_extension_threshold` units are ambiguous** ✅ Resolved
 
-The condition is `len(body) <= len(first_para) + trivial_extension_threshold`. `len()` is character count. The config table says the default is `25` and describes it in "tokens." 25 tokens ≈ 100 characters. If the comparison is character-based (as written), a threshold of 25 means 25 *characters* — very tight. If it should be 25 *tokens* (~100 chars), the implementation needs `trivial_extension_threshold * 4`. The requirements use "tokens" in the description but the formula as written uses raw `len()`. One of these is wrong.
+All thresholds, including `trivial_extension_threshold`, are in tokens. The inline classification condition now uses `measurer.measure()` for both sides: `measurer.measure(body) <= measurer.measure(first_paragraph) + args.trivial_extension_threshold`. Design updated.
 
 ---
 
@@ -66,9 +56,9 @@ The DriverLoop needs a visited-paths set, or `process_file` needs a signal to th
 
 ---
 
-**R7. DriverLoop enqueue logic — measure in loop or rely on gate?**
+**R7. DriverLoop enqueue logic — measure in loop or rely on gate?** ✅ Resolved
 
-The design says "any output path that exceeds the Soft Threshold is placed back on the queue." This implies DriverLoop measures each returned path before enqueuing. But `process_file` already has a gate that skips files below Soft Threshold. So DriverLoop could enqueue everything — the gate handles it. Which is it? If DriverLoop measures, it needs to instantiate a `Measurer` and read the file — redundant with `process_file`'s gate. If it enqueues everything, a large BFS run will process many small files unnecessarily. Needs a decision.
+DriverLoop enqueues all returned paths unconditionally. The coarse initial gate in `process_file` handles filtering — this is the single decision point. Design updated.
 
 ---
 
@@ -85,27 +75,25 @@ The assumption that "slice by line map = original bytes" needs to be verified, p
 
 ---
 
-**R9. Segment name length — filesystem limits**
+**R9. Segment name length — filesystem limits** ✅ Resolved
 
-Long headings produce long slug names. Linux ext4 limit is 255 bytes per filename component. Unicode headings can produce multi-byte filenames. The current design has no truncation step.
-
-Also: heading text that's *entirely* punctuation slugifies to an empty string. The design says this produces `heading_NN` — but this branch is only mentioned for "bare headings" (headings with no text at all). All-punctuation headings aren't "bare." Edge case.
+Slugs are now truncated to 200 bytes (UTF-8) in the design. The empty-slug fallback is now "any heading that slugifies to an empty string (bare headings, headings containing only punctuation, or similar)" — covers both cases explicitly. Design updated in both the `Segment` field definition and `_parse` step 3.
 
 ---
 
 ## Low Risk — Edge cases worth a test but probably fine
 
-**R10. `is_unsplittable` boundary**
+**R10. `is_unsplittable` boundary** ✅ Resolved
 
-`is_unsplittable` fires when `_parse` returns exactly one segment. But `_parse` also returns one segment if the document has exactly one heading at the target level and nothing above it. That's a valid (if degenerate) segmentation, not a no-headings failure. The warning emitted would be misleading. Consider checking for the no-headings condition explicitly (e.g., a flag from `_parse` rather than segment count).
+`is_unsplittable` now fires when segment count < `args.min_segment_count`. This cleanly covers both the no-headings case and the degenerate case (valid headings but too few to satisfy the minimum). The warning message in `process_file` updated to reflect the broader condition. Design updated.
 
 **R11. `_parse_segment` re-parse fidelity**
 
 When `_parse_segment` re-parses a segment body (during inline→subdoc demotion), it parses a fragment. Reference-style link definitions, footnotes, or other document-wide constructs defined elsewhere may not resolve correctly inside the fragment. Probably rare in practice, but worth noting for technical markdown documents.
 
-**R12. Block removal when all blocks are already gone**
+**R12. Block removal when all blocks are already gone** ✅ Resolved
 
-`reduce(threshold)` step 6 "sets blocks to `[]`, return 0" after exhausting all steps. Calling `reduce()` again on an already-empty segment should be a no-op (it returns 0 immediately). This is implied but not stated. The reduction loop calls `reduce()` on every subdoc segment every outer iteration — verify it handles the already-empty case without error.
+Two guards added: (1) `reduce()` is a documented no-op when `blocks` is already empty — returns 0 immediately. (2) A new `is_empty` property on `Segment` is checked as a precondition in Pass 2 of the reduction loop, skipping `reduce()` calls entirely for empty segments. Design updated.
 
 ---
 
