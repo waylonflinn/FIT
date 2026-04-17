@@ -100,7 +100,7 @@ The goal statement holds. No revisions needed.
 
 Object-oriented design. Core classes: `Measurer`, `Segment`, `Document`, `Writer` (factory pattern). `process_file` is thin — constructs objects and hands off to the reduction loop and writer. `DriverLoop` manages BFS queue of file paths. Inline vs. subdoc classification lives in `Document._parse`; the reduction loop progressively demotes inline segments to subdoc as the Inline Threshold decrements.
 
-→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~3,452 tokens)
+→ [001_basic_mechanical/design.md](001_basic_mechanical/design.md) (~4,337 tokens)
 
 ---
 
@@ -125,7 +125,7 @@ Some documentation sources (e.g. Anthropic's docs, built with Mintlify) use JSX 
 
 ## Implementation
 
-_To be completed._
+→ [001_basic_mechanical/implementation-plan.md](001_basic_mechanical/implementation-plan.md) (~5,050 tokens)
 
 ---
 
@@ -137,7 +137,7 @@ Primary failures: no recursion (six subdocs over 3k, four over 8k); code block b
 
 Additional test document candidates: `doc/anthropic/skills/skills/claude-api/shared/live-sources.md` (~4k tokens, do not load in full — extract URLs and download selectively as needed).
 
-→ [001_basic_mechanical/tests.md](001_basic_mechanical/tests.md) (~1244 tokens)
+→ [001_basic_mechanical/tests.md](001_basic_mechanical/tests.md) (~6,683 tokens)
 
 ---
 

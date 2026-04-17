@@ -60,11 +60,11 @@ The backbone of the design. Encapsulates a single named section of the document 
 
 **Block removal algorithm:**
 
-After each block removal, check `_cached_tokens` against `threshold`; stop and return as soon as the count falls below threshold. If the count never drops below threshold after exhausting all removal steps, return 0 and set blocks to `[]`.
+After each individual block removal, check `_cached_tokens` against `threshold`. Stop and return as soon as the count falls below threshold. If the count does not fall below threshold by the end of a step, proceed to the next. If the count never drops below threshold after exhausting all steps, return 0 and set blocks to `[]`.
 
 Removal steps in order:
 1. Remove non-priority code blocks in reverse document order
-2. Trim priority code blocks to one of each priority type, in reverse priority order then reverse document order (e.g. for `['python', 'typescript', 'json']`: trim `json` instances to one, then `typescript` to one, then `python` to one)
+2. Trim priority code blocks to one of each priority type, processing languages in reverse priority order. For each language (lowest priority first): remove all but the last instance of that language (in reverse document order within that language) before moving to the next language. Early-stop applies after each individual block removal — the loop may halt mid-language if the threshold is satisfied. (e.g. for `['python', 'typescript', 'json']`: remove all but one `json` block, then all but one `typescript` block, then all but one `python` block — stopping as soon as the token count drops below threshold.)
 3. Remove priority code blocks in reverse priority order until only the highest-priority type remains
 4. Remove non-code blocks in reverse document order until one non-code block remains
 5. Remove the final code block
