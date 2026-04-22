@@ -690,10 +690,9 @@ class Document:
                 depth -= 1
                 if depth == 0 and open_token is not None:
                     # Top-level container closed
-                    close_token = token
-                    if open_token.map and close_token.map:
+                    if open_token.map:
                         start = open_token.map[0]
-                        end = close_token.map[1]
+                        end = open_token.map[1]
                         top_level_ranges.append((start, end))
                     open_token = None
                 i += 1
