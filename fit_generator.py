@@ -84,6 +84,11 @@ class Segment:
         # Will be set by Document after construction
         self._link_overhead: int = 0
 
+    def __repr__(self) -> str:
+        body_len = 20
+        body_preview = self.body[:body_len].replace("\n", " ") + ("…" if len(self.body) > body_len else "")
+        return f"Segment(name={self.name!r}, heading={self.heading!r}, is_inline={self.is_inline}, body={body_preview!r})"
+
     @staticmethod
     def _is_code_block(block: str) -> bool:
         """Return True if this block is a fenced code block."""
