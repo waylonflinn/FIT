@@ -389,7 +389,7 @@ class Document:
     def _parse(text: str, measurer: Measurer, args) -> list[Segment]:
         """Full parsing pipeline. Returns list of Segment objects."""
         md = MarkdownIt()
-        tokens = md.parse(text)
+        tokens = md.parse(text).enable("table")
         lines = text.split("\n")
 
         # Step 1: Segmentation target detection
@@ -634,7 +634,7 @@ class Document:
     @staticmethod
     def _find_first_paragraph(body: str, md) -> Optional[str]:
         """Find the first paragraph text in the segment body. Returns None if not found."""
-        tokens = md.parse(body)
+        tokens = md.parse(body).enable("table")
         lines = body.split("\n")
 
         for i, token in enumerate(tokens):
@@ -653,7 +653,7 @@ class Document:
         Block text is NEVER stripped.
         """
         md = MarkdownIt()
-        tokens = md.parse(body)
+        tokens = md.parse(body).enable("table")
         lines = body.split("\n")
 
         # Find top-level block ranges using nesting depth tracking
