@@ -154,9 +154,10 @@ class TestSegmentConstruction:
 
     def test_S01_name_slug_spaces_and_punctuation(self, measurer, default_args):
         """S-01: Name slug converts spaces and punctuation to underscores, collapsed."""
+
         text = (
-            "# Root\n\nIntro content.\n\n"
-            "## Hello, World! — A Test\n\nSome content here with enough text.\n" * 10
+           "# Root\n\nIntro content.\n\n"
+            + "## Hello, World! — A Test\n\nSome content here with enough text.\n" * 10
         )
         segments = make_doc(text, default_args, measurer)
         print(segments)
