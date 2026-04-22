@@ -8,7 +8,7 @@ _Elapsed: ~4d_
 
 _Daily logs: Requirements/Synthesis/Research: 2026-04-09.md_
 
-_Status: Test (7/10)_
+_Status: Debug (8/10)_
 
 _Updated: 2026-04-22_
 
@@ -143,7 +143,9 @@ Additional test document candidates: `doc/anthropic/skills/skills/claude-api/sha
 
 ## Bugs
 
-_To be completed._
+B1 (fixed) — _parse_segment silently drops container blocks (bullet_list, ordered_list, blockquote, table). Root cause: top_level_ranges was built as (open.map[0], close.map[1]) pairs, but container close tokens always have map=None in markdown-it-py. The null check if open_token.map and close_token.map silently discarded the range. Fix: use (open_token.map[0], open_token.map[1]) — the open token's map already spans the full container extent. Confirmed via prototype prototypes/close_token_maps/close_token_maps.py.
+
+B2 (open) — Duplicate heading names are not fully suffixed. When a slug appears more than once, the first occurrence is assigned the bare name (section) and subsequent ones are suffixed (section_01, section_02). Expected behavior: all occurrences suffixed from _01. Root cause: single-pass name assignment in Document._parse — first-seen gets no suffix. Fix requires a two-pass approach: pre-scan all slugs to identify duplicates, then assign _01-onward suffixes to all instances.
 
 ---
 
