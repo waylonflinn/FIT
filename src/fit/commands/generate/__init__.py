@@ -14,27 +14,27 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
     )
     p.add_argument("path", help="Markdown file to process.")
     p.add_argument(
-        "--level",
+        "-l", "--level",
         type=int,
         default=1,
         help="FIT generation level (default: 1).",
     )
     p.add_argument(
-        "--soft-threshold",
+        "-s", "--soft-threshold",
         type=int,
         default=3000,
         dest="soft_threshold",
         help="Soft token target; triggers splitting (default: 3000).",
     )
     p.add_argument(
-        "--hard-threshold",
+        "-t", "--hard-threshold",
         type=int,
         default=5000,
         dest="hard_threshold",
         help="Hard token ceiling (default: 5000).",
     )
     p.add_argument(
-        "--inline-threshold",
+        "-i", "--inline-threshold",
         type=int,
         default=600,
         dest="inline_threshold",
@@ -76,7 +76,7 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         help="Recursively process subdocuments produced by splitting (default: off).",
     )
     p.add_argument(
-        "--dry-run",
+        "-n", "--dry-run",
         action="store_true",
         default=False,
         dest="dry_run",
