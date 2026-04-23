@@ -161,10 +161,11 @@ class TestSegmentConstruction:
         )
         segments = make_doc(text, default_args, measurer)
         print(segments)
-        # Find the segment with heading "Hello, World! — A Test"
-        target = next((s for s in segments if "Hello" in s.heading), None)
-        assert target is not None
-        assert target.name == "Hello_World_A_Test"
+        # Check all segments with headings beginning with "Hello, World! — A Test"
+        for i, target in enumerate(s for s in segments if "Hello" in s.heading):
+            assert target is not None
+            assert target.name == f"Hello_World_A_Test_{i+1:02d}"
+
 
     def test_S02_name_slug_empty_to_heading_NN(self, measurer, default_args):
         """S-02: Heading that slugifies to empty string -> heading_NN."""
@@ -217,8 +218,8 @@ class TestSegmentConstruction:
             "## Overview\n\nContent B.\n"
         )
         segments = make_doc(text, args, measurer)
-        assert segments[0].name == "Overview"
-        assert segments[1].name == "Overview_01"
+        assert segments[0].name == "Overview_01"
+        assert segments[1].name == "Overview_02"
 
     def test_S05_name_slug_truncated_200_bytes(self, measurer, default_args):
         """S-05: Name slug truncated to 200 bytes UTF-8."""

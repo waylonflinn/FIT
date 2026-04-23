@@ -388,8 +388,8 @@ class Document:
     @staticmethod
     def _parse(text: str, measurer: Measurer, args) -> list[Segment]:
         """Full parsing pipeline. Returns list of Segment objects."""
-        md = MarkdownIt()
-        tokens = md.parse(text).enable("table")
+        md = MarkdownIt().enable("table")
+        tokens = md.parse(text)
         lines = text.split("\n")
 
         # Step 1: Segmentation target detection
@@ -412,41 +412,16 @@ class Document:
             )
             return [seg]
 
-        # Name generation with deduplication
-        name_counts: dict[str, int] = {}
         result_segments = []
 
         inline_languages = getattr(args, "inline_languages", ["python", "javascript", "typescript"])
         if isinstance(inline_languages, str):
             inline_languages = [l.strip() for l in inline_languages.split(",")]
 
-        for idx, (heading, body, seg_type) in enumerate(segments_data):
-            # Generate slug name
-            if seg_type == "rule":
-                base_name = None  # will use rule_NN
-                is_rule = True
-            else:
-                is_rule = False
-                base_name = Document._slugify(heading)
+        names = Document._assign_names(segments_data)
 
-            if is_rule or not base_name:
-                if is_rule:
-                    prefix = "rule"
-                else:
-                    prefix = "heading"
-                # Count occurrences of this prefix
-                count = name_counts.get(prefix, 0) + 1
-                name_counts[prefix] = count
-                name = f"{prefix}_{count:02d}"
-            else:
-                # Deduplicate
-                if base_name not in name_counts:
-                    name_counts[base_name] = 0
-                    name = base_name
-                else:
-                    name_counts[base_name] += 1
-                    suffix_num = name_counts[base_name]
-                    name = f"{base_name}_{suffix_num:02d}"
+        for idx, (heading, body, seg_type) in enumerate(segments_data):
+            name = names[idx]
 
             # Step 4: Inline/subdoc classification
             body_tokens = measurer.measure(body)
@@ -519,6 +494,48 @@ class Document:
             encoded = encoded[:200]
             slug = encoded.decode("utf-8", errors="ignore")
         return slug
+
+    @staticmethod
+    def _assign_names(segments_data: list) -> list[str]:
+        """
+        Generate a name for each segment in segments_data.
+
+        Rules: rule_01, rule_02, ...
+        Blank/empty slugs: heading_NN where NN is the overall heading count at that point.
+        Unique slugs: bare slug.
+        Duplicate slugs: slug_01, slug_02, ...
+
+        counts key conventions:
+          "_rule"    — sequential counter for rule segments (sentinel; slugs never start with _)
+          "_heading" — sequential counter for all heading segments, used for blank heading names
+          <slug>     — per-slug counter for duplicate slugs only
+        """
+        # Pre-scan: count slug frequency for heading segments
+        slug_freq: dict[str, int] = {}
+        for heading, body, seg_type in segments_data:
+            if seg_type == "heading":
+                slug = Document._slugify(heading)
+                if slug:
+                    slug_freq[slug] = slug_freq.get(slug, 0) + 1
+
+        # Assign names
+        counts: dict[str, int] = {}
+        names = []
+        for heading, body, seg_type in segments_data:
+            if seg_type == "rule":
+                counts["_rule"] = counts.get("_rule", 0) + 1
+                names.append(f"rule_{counts['_rule']:02d}")
+            else:  # heading
+                counts["_heading"] = counts.get("_heading", 0) + 1
+                slug = Document._slugify(heading)
+                if not slug:
+                    names.append(f"heading_{counts['_heading']:02d}")
+                elif slug_freq[slug] == 1:
+                    names.append(slug)
+                else:
+                    counts[slug] = counts.get(slug, 0) + 1
+                    names.append(f"{slug}_{counts[slug]:02d}")
+        return names
 
     @staticmethod
     def _find_segmentation_target(tokens, min_segment_count: int):
@@ -634,7 +651,7 @@ class Document:
     @staticmethod
     def _find_first_paragraph(body: str, md) -> Optional[str]:
         """Find the first paragraph text in the segment body. Returns None if not found."""
-        tokens = md.parse(body).enable("table")
+        tokens = md.parse(body)
         lines = body.split("\n")
 
         for i, token in enumerate(tokens):
@@ -652,8 +669,8 @@ class Document:
         Uses next_start slicing to preserve inter-block blank lines.
         Block text is NEVER stripped.
         """
-        md = MarkdownIt()
-        tokens = md.parse(body).enable("table")
+        md = MarkdownIt().enable("table")
+        tokens = md.parse(body)
         lines = body.split("\n")
 
         # Find top-level block ranges using nesting depth tracking

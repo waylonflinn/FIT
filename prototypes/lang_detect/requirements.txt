@@ -1,0 +1,6 @@
+markdown-it-py
+pygments
+whats-that-code
+codelang-detect
+# Note: whats-that-code and codelang-detect are prototype-only.
+# The FIT generator itself uses only info strings + pygments.get_lexer_by_name.

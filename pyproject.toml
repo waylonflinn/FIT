@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fit"
+version = "0.1.0"
+description = "Generate Fitted Information Trees from markdown documents"
+requires-python = ">=3.10"
+dependencies = [
+    "markdown-it-py>=3.0.0",
+    "pygments>=2.0.0",
+]
+
+[project.scripts]
+fit = "fit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
