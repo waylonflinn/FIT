@@ -35,7 +35,8 @@ def run(args) -> None:
                 dry_run=args.dry_run,
                 is_root=is_root,
             )
-            queue.extend(new_paths)
+            if args.recurse:
+                queue.extend(new_paths)
         except Exception as e:
             logger.error(f"Error processing {path}: {e}")
             raise

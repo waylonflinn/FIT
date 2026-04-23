@@ -69,6 +69,13 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         help="Comma-separated preferred languages for code block priority (default: python,javascript,typescript).",
     )
     p.add_argument(
+        "-r", "--recurse",
+        action="store_true",
+        default=False,
+        dest="recurse",
+        help="Recursively process subdocuments produced by splitting (default: off).",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         default=False,
