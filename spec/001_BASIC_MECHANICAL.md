@@ -315,3 +315,72 @@ Possible follow-on tasks identified during the build process. Out of scope for t
 - **Robust sentence splitting** — replace the stdlib regex fallback with `nltk.sent_tokenize` for better handling of edge cases (abbreviations, inline code with periods, parenthetical sentences)
 - **Extractive lead-in summaries** — use `sumy` (TextRank or LSA) to generate tighter one-liner summaries for root doc entries when the first paragraph is too long to inline cleanly
 - All three are optional dependencies — tool works without them, they improve output quality when present; pattern fits well for a standalone script intended for external use
+
+### Extension: Dry-Run Recursion (Option A)
+
+When both `-n`/`--dry-run` and `-r`/`--recurse` are set, normal dry-run returns no paths so the BFS queue is never fed. Fix: introduce a `TempDirWriter` that mirrors `Writer`'s filesystem behavior but writes to a `tempfile.mkdtemp()` directory, printing with `[DRY RUN]` prefix. After the full BFS completes, the temp directory is deleted.
+
+**Implementation:**
+- `writer.py` — add `TempDirWriter(base_dir: Path)`. Writes files under `base_dir` preserving the relative directory structure; prints `[DRY RUN]` prefixed actions identical to `DryRunWriter`. Returns real subdoc paths (under `base_dir`) so the BFS queue is populated correctly.
+- `WriterFactory.create()` — when `dry_run=True` and `recurse=True`, return `TempDirWriter(Path(tempfile.mkdtemp()))`.
+- `commands/generate/level1.py` — after the BFS loop exits, delete the temp dir if one was created (`shutil.rmtree`). Pass `recurse` flag down so the caller knows whether to extend the queue.
+
+No changes to `driver.py` or the library core.
+
+### Extension: Mintlify/MDX Preprocessing
+
+Mintlify documentation sources embed JSX components in markdown that markdown-it-py parses as opaque `html_block` tokens. Two additions handle this: a `preprocess` subcommand that normalizes these documents to standard markdown, and a guard in `generate` that detects unprocessed tags and aborts.
+
+#### Tags
+
+**Structural — hard blockers** (affect split boundaries; `generate` aborts on detection):
+- `<section title="...">` / `</section>` — section grouping; convert to heading at depth+1 relative to containing heading
+- `<CodeGroup>` / `</CodeGroup>` — tabbed code block wrapper; discard wrapper, keep content blocks
+- `<Tabs>` / `<Tab>` — tabbed content; discard wrapper, keep tab content blocks
+- `<Accordion>` / `<AccordionGroup>` — expandable sections; discard group wrapper, convert each `<Accordion title="...">` to a heading at depth+1
+- `<Steps>` / `<Step>` — step sequences; convert each `<Step>` to a numbered list item
+- `<Card>` / `<CardGroup>` — grouped content cards; discard group wrapper, convert each `<Card title="...">` to a heading at the next lower level after the containing heading; if the containing heading is already H6, drop the heading and keep only the card body
+
+**Content wrappers — warn only** (render as opaque blobs but unlikely to affect split quality; `generate` warns but does not abort):
+- `<Tip>`, `<Note>`, `<Warning>`, `<Info>`, `<Danger>` — admonitions; convert to blockquote with bold label: `> **Note:** ...`
+- `<Frame>` — image/media wrapper; discard wrapper, keep content
+- `<ResponseField>`, `<ParamField>` — API documentation fields; best-effort conversion (TBD at implementation time)
+
+#### `fit preprocess`
+
+New subcommand: `commands/preprocess.py` (flat module, no level dispatch).
+
+```
+fit preprocess <path>
+```
+
+Operates in-place. Backs up the original as `<basename>.orig.md` before writing. Processes all structural and content-wrapper tags. After preprocessing, the file contains only standard CommonMark markdown.
+
+Uses the approach from the existing prototype (`forge/fit/prototypes/`): parse with markdown-it-py to get a token stream, walk tokens tracking heading depth, replace `html_block` tokens matching JSX patterns with synthetic standard markdown, reconstruct output using `token.map` line ranges against original source. The prototype becomes the production implementation — it is not throwaway.
+
+Implementation note: `<Card>`/`<CardGroup>` heading conversion requires tracking the heading depth of the nearest containing heading in the token stream. If no containing heading exists, treat as H2.
+
+#### Guard in `generate`
+
+Before constructing `Document`, scan raw text for structural tag patterns using regex. If any structural tag is found:
+- Print a message identifying the tags found and recommending `fit preprocess` be run first
+- Exit with a non-zero exit code
+
+`--force` bypasses the guard entirely and proceeds with generation. Structural tag detection uses simple regex against the raw text (no parsing required) — fast and dependency-free.
+
+#### Guard in `measure`
+
+If structural tags are detected:
+- Print a warning that unprocessed Mintlify tags were found and token counts may be slightly inaccurate
+- Continue with measurement and print the result normally
+- No `--force` required
+
+#### Project layout additions
+
+```
+src/fit/
+└── commands/
+    └── preprocess.py    ← preprocess subcommand
+```
+
+`cli.py` registers the new subcommand alongside `generate` and `measure`. Tag detection logic lives in a shared utility (e.g. `fit/mdx.py`) used by both `preprocess.py` and the guard in `generate`.
