@@ -18,14 +18,14 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
     )
     p.add_argument("path", help="Markdown file to measure.")
     p.add_argument(
-        "--soft-threshold",
+        "-s", "--soft-threshold",
         type=int,
         default=3000,
         dest="soft_threshold",
         help="Soft token target (default: 3000).",
     )
     p.add_argument(
-        "--hard-threshold",
+        "-t", "--hard-threshold",
         type=int,
         default=5000,
         dest="hard_threshold",
