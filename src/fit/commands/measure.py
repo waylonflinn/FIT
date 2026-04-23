@@ -4,6 +4,7 @@ measure subcommand — estimate token count for a markdown file.
 
 from __future__ import annotations
 
+import sys
 import argparse
 from pathlib import Path
 
@@ -33,6 +34,15 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
     p.set_defaults(func=run)
     return p
 
+def _colorize(status: str) -> str:
+    if not sys.stdout.isatty():
+        return status
+    if status == "fits":
+        return f"\033[32m{status}\033[0m"           # green
+    elif status == "exceeds soft threshold":
+        return f"\033[33m{status}\033[0m"           # yellow
+    else:
+        return f"\033[31m{status}\033[0m"           # red
 
 def run(args) -> None:
     path = Path(args.path)
@@ -50,4 +60,4 @@ def run(args) -> None:
     else:
         status = "exceeds hard threshold"
 
-    print(f"{count} tokens — {status}  ({path})")
+    print(f"{count:,} tokens — {_colorize(status)}  ({path})")
