@@ -91,3 +91,129 @@ Document is fitted to a specific task via a capable LLM. An LLM is provided with
 Capability level is Strong Semantic: capable of strong semantic understanding and deep structural optimization; adequate context for processing large documents with full task context without suffering significant long context degradation ("lost in the middle" and "context rot" failure modes).
 
 Example models: Gemma 4 26B (gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf),  Devstral Small 2, Qwen3-Coder-30B-A3B
+
+---
+
+## Installation
+
+Requires Python 3.10+. Install into a virtual environment:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+After installation, the `fit` command is available at `.venv/bin/fit`.
+
+---
+
+## Usage
+
+### `fit generate`
+
+Generate a FIT from a markdown file. The file is split in-place; the original is backed up as `<filename>.unfit.md` before any writes.
+
+```
+fit generate [options] <path>
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--level` | `1` | FIT generation level |
+| `--soft-threshold` | `3000` | Soft token target; triggers splitting |
+| `--hard-threshold` | `5000` | Hard token ceiling; triggers warnings |
+| `--inline-threshold` | `600` | Segments below this are inlined verbatim |
+| `--inline-threshold-reduction-increment` | `100` | Amount inline threshold drops per iteration |
+| `--trivial-extension-threshold` | `25` | Inline single-paragraph segments within this many tokens of the paragraph |
+| `--min-segment-count` | `3` | Minimum segments required to split at a heading level (minimum: 2) |
+| `--inline-languages` | `python,javascript,typescript` | Preferred languages for code block priority (comma-separated) |
+| `--dry-run` | — | Print planned actions without writing any files |
+
+**Example:**
+
+```bash
+# Preview first
+.venv/bin/fit generate --dry-run doc/large-document.md
+
+# Then apply
+.venv/bin/fit generate doc/large-document.md
+```
+
+### `fit measure`
+
+Estimate the token count of a markdown file and check it against the thresholds.
+
+```
+fit measure [options] <path>
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--soft-threshold` | `3000` | Soft token target |
+| `--hard-threshold` | `5000` | Hard token ceiling |
+
+**Example:**
+
+```bash
+.venv/bin/fit measure doc/overview.md
+# 2137 tokens — fits  (doc/overview.md)
+```
+
+---
+
+## Development
+
+### Project Layout
+
+```
+forge/fit/
+├── pyproject.toml           # package metadata and entry points
+├── src/
+│   └── fit/
+│       ├── __init__.py      # public API: Measurer, Segment, Document, Writer, ...
+│       ├── cli.py           # top-level argument parsing and subcommand dispatch
+│       ├── commands/
+│       │   ├── generate/
+│       │   │   ├── __init__.py   # generate subcommand args and level dispatch
+│       │   │   └── level1.py     # Level 1/1.5 implementation
+│       │   └── measure.py        # measure subcommand
+│       ├── measurer.py      # Measurer — token count estimation
+│       ├── segment.py       # Segment — named document section
+│       ├── document.py      # Document — parsing and segmentation
+│       ├── writer.py        # Writer, DryRunWriter, WriterFactory
+│       └── driver.py        # process_file, _reduction_loop
+├── tests/
+│   ├── conftest.py          # shared fixtures and helpers
+│   ├── test_measurer.py
+│   ├── test_segment.py
+│   ├── test_document.py
+│   ├── test_writer.py
+│   └── test_driver.py
+├── spec/                    # design documents
+└── prototypes/              # exploratory scripts
+```
+
+### Running Tests
+
+```bash
+.venv/bin/pytest tests/ -q
+```
+
+Run a single test file:
+
+```bash
+.venv/bin/pytest tests/test_document.py -q
+```
+
+### Using the Library
+
+Core classes are importable directly after install:
+
+```python
+from fit import Document, Measurer
+
+measurer = Measurer()
+doc = Document(text, measurer, soft_threshold=3000)
+for segment in doc:
+    print(segment.name, segment.measure())
+```
