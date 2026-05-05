@@ -26,6 +26,7 @@ def process_file(
     min_segment_count: int = 3,
     inline_languages: list[str] | None = None,
     dry_run: bool = False,
+    verbose: bool = False,
     is_root: bool = False,
 ) -> list[Path]:
     """
@@ -59,7 +60,8 @@ def process_file(
         )
         return []
 
-    writer = WriterFactory.create(dry_run=dry_run)
+    writer = WriterFactory.create(dry_run=dry_run, verbose=verbose)
+    writer.log(f"Processing file: {path}")
     return _reduction_loop(
         doc,
         writer,
