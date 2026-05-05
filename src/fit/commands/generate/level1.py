@@ -33,6 +33,7 @@ def run(args) -> None:
                 min_segment_count=args.min_segment_count,
                 inline_languages=inline_languages,
                 dry_run=args.dry_run,
+                verbose=args.verbose,
                 is_root=is_root,
             )
             if args.recurse:

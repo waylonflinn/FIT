@@ -82,6 +82,13 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         dest="dry_run",
         help="Print what would happen without writing files.",
     )
+    p.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        default=False,
+        dest="verbose",
+        help="Print actions as they are performed.",
+    )
     p.set_defaults(func=run)
     return p
 
