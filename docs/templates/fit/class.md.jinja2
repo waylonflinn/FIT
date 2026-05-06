@@ -14,33 +14,49 @@
 
 ## Attributes
 
-| Name | Type | Description |
-|------|------|-------------|
 {%- for attr in section.value %}
-| `{{ attr.name }}` | `{{ attr.annotation }}` | {{ attr.description }} |
+- `{{ attr.name }}`{% if attr.annotation %} (`{{ attr.annotation }}`){% endif %} — {{ attr.description }}
 {%- endfor %}
 {%- endif %}
 {%- endfor %}
 {%- endif %}
 
 {%- set init = obj.members.get('__init__') %}
-{%- if init and init.docstring %}
-{%- for section in init.docstring.parsed %}
-{%- if section.kind.value == "parameters" %}
+{%- if init %}
 
 ## Constructor
 
 ```python
-{{ obj.name }}({% for p in section.value %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
+{{ obj.name }}({% for p in init.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
 ```
+{%- if init.docstring %}
+{%- for section in init.docstring.parsed %}
+{%- if section.kind.value == "text" %}
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-{% for param in section.value -%}
-| `{{ param.name }}` | `{{ param.annotation if param.annotation else "" }}` | {{ param.description }} |
+{{ section.value }}
+
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- set ns2 = namespace(has_params=false) %}
+{%- if init.docstring %}
+{%- for section in init.docstring.parsed %}
+{%- if section.kind.value == "parameters" %}
+{%- set ns2.has_params = true %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- if ns2.has_params %}
+{%- for section in init.docstring.parsed %}
+{%- if section.kind.value == "parameters" %}
+{% for param in section.value %}
+- `{{ param.name }}`{% if param.annotation %} (`{{ param.annotation }}`){% endif %} — {{ param.description }}
 {%- endfor %}
 {%- endif %}
 {%- endfor %}
+{%- endif %}
 {%- endif %}
 
 {%- set ns = namespace(has_methods=false) %}
@@ -65,9 +81,11 @@
 {%- if section.kind.value == "text" %}
 
 {{ section.value }}
+
 {%- endif %}
 {%- endfor %}
 {%- endif %}
+
 {%- set ns2 = namespace(has_params=false) %}
 {%- if method.docstring %}
 {%- for section in method.docstring.parsed %}
@@ -76,18 +94,17 @@
 {%- endif %}
 {%- endfor %}
 {%- endif %}
-{%- if ns2.has_params %}
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
+{%- if ns2.has_params %}
 {%- for section in method.docstring.parsed %}
 {%- if section.kind.value == "parameters" %}
-{% for param in section.value -%}
-| `{{ param.name }}` | `{{ param.annotation if param.annotation else "" }}` | {{ param.description }} |
-{% endfor %}
+{% for param in section.value %}
+- `{{ param.name }}`{% if param.annotation %} (`{{ param.annotation }}`){% endif %} — {{ param.description }}
+{%- endfor %}
 {%- endif %}
 {%- endfor %}
 {%- endif %}
+
 {%- if method.docstring %}
 {%- for section in method.docstring.parsed %}
 {%- if section.kind.value == "returns" %}

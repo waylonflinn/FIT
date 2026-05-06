@@ -7,7 +7,7 @@
     {%- if method.docstring %}{% set ns.chars = ns.chars + method.docstring.value | length %}{% endif -%}
   {%- endif -%}
 {%- endfor -%}
-{{ (ns.chars / 4) | int }}
+{{ (ns.chars*1.6 / 4) | int }}
 {%- endmacro -%}
 # fit API
 
@@ -32,6 +32,30 @@
 {{ section.value }}
 {%- endif %}
 {%- endfor %}
+{%- endif %}
+
+{%- set ns = namespace(has_methods=false) %}
+{%- for name, member in cls.members.items() %}
+{%- if member.kind.value == "function" and not name.startswith('_') %}
+{%- set ns.has_methods = true %}
+{%- endif %}
+{%- endfor %}
+
+{%- if ns.has_methods %}
+#### Interface
+
+```python
+{%- set init = cls.members.get('__init__') %}
+{%- if init %}
+{{ cls.name }}({% for p in init.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
+{% endif -%}
+
+{%- for name, method in cls.members.items() %}
+{%- if method.kind.value == "function" and not name.startswith('_') %}
+{{ cls.name }}.{{ method.name }}({% for p in method.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}) -> {{ method.returns }}
+{% endif -%}
+{%- endfor %}
+```
 {%- endif %}
 
 → [{{ cls.name }}]({{ cls.name }}.md) (~{{ estimate_tokens(cls) }} tokens)
