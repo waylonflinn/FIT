@@ -217,3 +217,14 @@ doc = Document(text, measurer, soft_threshold=3000)
 for segment in doc:
     print(segment.name, segment.measure())
 ```
+
+### Generating Docs
+The griffonner library is used to generate FIT style docs for this project.
+
+```
+PYTHONPATH=src .venv/bin/griffonner generate docs/pages/ --output docs/output --template-dir docs/templates
+```
+If you want live reload while editing templates or page configs:
+```
+PYTHONPATH=src .venv/bin/griffonner watch docs/pages/ --output docs/output --template-dir docs/templates
+```

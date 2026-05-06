@@ -1,0 +1,40 @@
+{%- macro estimate_tokens(cls) -%}
+{%- set ns = namespace(chars=0) -%}
+{%- if cls.docstring %}{% set ns.chars = ns.chars + cls.docstring.value | length %}{% endif -%}
+{%- for name, method in cls.members.items() -%}
+  {%- if method.kind.value == "function" -%}
+    {%- set ns.chars = ns.chars + name | length -%}
+    {%- if method.docstring %}{% set ns.chars = ns.chars + method.docstring.value | length %}{% endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{{ (ns.chars / 4) | int }}
+{%- endmacro -%}
+# fit API
+
+{%- if obj.docstring %}
+{%- for section in obj.docstring.parsed %}
+{%- if section.kind.value == "text" %}
+{{ section.value }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+## Classes
+
+{%- for name, cls in obj.classes.items() %}
+{%- if not name.startswith('_') %}
+
+### {{ cls.name }}
+
+{%- if cls.docstring %}
+{%- for section in cls.docstring.parsed %}
+{%- if section.kind.value == "text" %}
+{{ section.value }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+→ [{{ cls.name }}]({{ cls.name }}.md) (~{{ estimate_tokens(cls) }} tokens)
+
+{%- endif %}
+{%- endfor %}

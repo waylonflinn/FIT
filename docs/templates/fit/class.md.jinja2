@@ -1,0 +1,103 @@
+# {{ obj.name }}
+{%- if obj.docstring %}
+{%- for section in obj.docstring.parsed %}
+{%- if section.kind.value == "text" %}
+
+{{ section.value }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- if obj.docstring %}
+{%- for section in obj.docstring.parsed %}
+{%- if section.kind.value == "attributes" %}
+
+## Attributes
+
+| Name | Type | Description |
+|------|------|-------------|
+{%- for attr in section.value %}
+| `{{ attr.name }}` | `{{ attr.annotation }}` | {{ attr.description }} |
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- set init = obj.members.get('__init__') %}
+{%- if init and init.docstring %}
+{%- for section in init.docstring.parsed %}
+{%- if section.kind.value == "parameters" %}
+
+## Constructor
+
+```python
+{{ obj.name }}({% for p in section.value %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+{% for param in section.value -%}
+| `{{ param.name }}` | `{{ param.annotation if param.annotation else "" }}` | {{ param.description }} |
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- set ns = namespace(has_methods=false) %}
+{%- for name, member in obj.members.items() %}
+{%- if member.kind.value == "function" and not name.startswith('_') %}
+{%- set ns.has_methods = true %}
+{%- endif %}
+{%- endfor %}
+{%- if ns.has_methods %}
+
+## Methods
+{%- for name, method in obj.members.items() %}
+{%- if method.kind.value == "function" and not name.startswith('_') %}
+
+### {{ method.name }}
+
+```python
+{{ method.name }}({% for p in method.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}) -> {{ method.returns }}
+```
+{%- if method.docstring %}
+{%- for section in method.docstring.parsed %}
+{%- if section.kind.value == "text" %}
+
+{{ section.value }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- set ns2 = namespace(has_params=false) %}
+{%- if method.docstring %}
+{%- for section in method.docstring.parsed %}
+{%- if section.kind.value == "parameters" %}
+{%- set ns2.has_params = true %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if ns2.has_params %}
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+{%- for section in method.docstring.parsed %}
+{%- if section.kind.value == "parameters" %}
+{% for param in section.value -%}
+| `{{ param.name }}` | `{{ param.annotation if param.annotation else "" }}` | {{ param.description }} |
+{% endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if method.docstring %}
+{%- for section in method.docstring.parsed %}
+{%- if section.kind.value == "returns" %}
+{%- for ret in section.value %}
+
+**Returns:** {{ ret.description }}
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
