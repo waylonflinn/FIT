@@ -25,8 +25,9 @@
 {%- if not name.startswith('_') %}
 
 ### {{ cls.name }}
+`forge/fit/{{cls.relative_filepath}}` · _lines {{ cls.lineno }}–{{ cls.endlineno }}_
 
-{%- if cls.docstring %}
+{% if cls.docstring -%}
 {%- for section in cls.docstring.parsed %}
 {%- if section.kind.value == "text" %}
 {{ section.value }}

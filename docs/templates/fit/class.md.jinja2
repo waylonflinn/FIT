@@ -1,5 +1,5 @@
 # {{ obj.name }}
-_lines {{ obj.lineno }}–{{ obj.endlineno }}_
+`forge/fit/{{obj.relative_filepath}}` · _lines {{ obj.lineno }}–{{ obj.endlineno }}_
 
 {%- if obj.docstring %}
 {%- for section in obj.docstring.parsed %}
