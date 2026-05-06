@@ -10,9 +10,22 @@ from fit.document import Document
 
 
 class Writer:
-    """Writes document splits to the filesystem."""
+    """Writes document splits to the filesystem.
+
+    Produces three outputs: 
+
+    - a backup of the original file
+    - a rewritten root document with:
+        - inline segments preserved
+        - subdoc segments reduced, with a link to full contents
+    - one file per subdoc segment
+    """
 
     def __init__(self, verbose: bool = False):
+        """
+        Args:
+            verbose: If True, log progress to stdout.
+        """
         self._verbose = verbose
         if(verbose):
             self.log = print
@@ -20,9 +33,14 @@ class Writer:
             self.log = lambda *args, **kwargs: None # no-op
 
     def write(self, document: Document, source_path: Path) -> list[Path]:
-        """
-        Write backup, root document, and subdoc files.
-        Returns list of new subdoc paths created.
+        """Write backup, root document, and subdoc files.
+
+        Args:
+            document: The split document to write.
+            source_path: Path of the original source file.
+
+        Returns:
+            Paths of subdoc files created.
         """
         source_path = Path(source_path)
 
@@ -54,7 +72,7 @@ class Writer:
             else:
                 subdoc_dir.mkdir(parents=True, exist_ok=True)
                 subdoc_path = subdoc_dir / f"{seg.name}.md"
-                self.log(f"  SUBDOC: {seg.name} -> {subdoc_path} ({seg._measurer.measure(seg.body):,} tokens)")
+                self.log(f"  SUBDOC: {seg.name} -> {subdoc_path} ({seg.measure(complete=True):,} tokens)")
                 subdoc_path.write_text(seg.body, encoding="utf-8")
                 subdoc_paths.append(subdoc_path)
 
@@ -62,10 +80,27 @@ class Writer:
 
 
 class DryRunWriter:
-    """Prints planned actions without writing any files."""
+    """Prints planned write actions without touching the filesystem.
+
+    Always logs to stdout — dry-run is verbose by design.
+    Returns an empty list from write() because no files are actually written
+    and thus file based recursion is not possible.
+    """
+
+    def __init__(self):
+
+        self.log = lambda message: print(f"[DRY RUN] {message}")
 
     def write(self, document: Document, source_path: Path) -> list[Path]:
-        """Print planned actions. Returns empty list (no files created)."""
+        """Print planned actions without writing any files.
+
+        Args:
+            document: The split document to preview.
+            source_path: Path of the original source file.
+
+        Returns:
+            Empty list; no files are created.
+        """
         source_path = Path(source_path)
         backup_path = source_path.parent / f"{source_path.stem}.unfit{source_path.suffix}"
         subdoc_dir = source_path.parent / source_path.stem
@@ -88,17 +123,25 @@ class DryRunWriter:
 
                 subdoc_paths.append(subdoc_path)
 
-        # DryRunWriter returns [] — no files created, driver loop won't recurse
         return []
 
-    def log(self, message):
-        print(f"[DRY RUN] {message}")
-
 class WriterFactory:
-    """Factory for Writer instances."""
+    """Factory for Writer and DryRunWriter.
+
+    Writer and DryRunWriter are duck-typed via .write(); no shared base class.
+    """
 
     @staticmethod
     def create(dry_run: bool = False, verbose: bool = False) -> "Writer | DryRunWriter":
+        """Create a Writer or DryRunWriter.
+
+        Args:
+            dry_run: If True, return a DryRunWriter.
+            verbose: Passed to Writer; ignored for DryRunWriter.
+
+        Returns:
+            A DryRunWriter if dry_run, otherwise a Writer.
+        """
         if dry_run:
             return DryRunWriter()
         return Writer(verbose=verbose)

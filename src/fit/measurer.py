@@ -6,17 +6,30 @@ from __future__ import annotations
 
 
 class Measurer:
-    """Estimate token count from a string. Injected into Document and Segment."""
+    """Character-based token count estimator.
+
+    A lightweight approximation; does not depend on a real tokenizer.
+    This simple implementation is a functional placeholder for a more accurate estimator.
+
+    Attributes:
+        TEXT_RATIO: Characters per token for prose. Rule-of-thumb; not validated.
+        CODE_RATIO: Characters per token for code. Lower than TEXT_RATIO; code is typically denser.
+    """
 
     TEXT_RATIO: float = 4.0
     CODE_RATIO: float = 3.5
 
     def measure(self, text: str) -> int:
-        """Estimate token count. Uses code ratio if text is a fenced code block.
+        """Estimate the token count of a string.
 
-        Detection: stripped text starts AND ends with three backticks (```) and is not
-        exactly "```" (a bare unopened fence). This matches strings that open and close
-        with a fence marker.
+        Uses CODE_RATIO for fenced code blocks, TEXT_RATIO otherwise.
+        Code blocks are detected by heuristic, so mixed-content strings are treated as prose.
+
+        Args:
+            text: The string to estimate.
+
+        Returns:
+            Estimated token count.
         """
         if not text:
             return 0
