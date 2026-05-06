@@ -1,4 +1,6 @@
 # {{ obj.name }}
+_lines {{ obj.lineno }}–{{ obj.endlineno }}_
+
 {%- if obj.docstring %}
 {%- for section in obj.docstring.parsed %}
 {%- if section.kind.value == "text" %}
@@ -25,6 +27,7 @@
 {%- if init %}
 
 ## Constructor
+_lines {{ init.lineno }}–{{ init.endlineno }}_
 
 ```python
 {{ obj.name }}({% for p in init.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
@@ -72,6 +75,7 @@
 {%- if method.kind.value == "function" and not name.startswith('_') %}
 
 ### {{ method.name }}
+_lines {{ method.lineno }}–{{ method.endlineno }}_
 
 ```python
 {{ method.name }}({% for p in method.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}) -> {{ method.returns }}
