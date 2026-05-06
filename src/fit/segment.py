@@ -77,9 +77,9 @@ class Segment:
         except ImportError:
             return lang.lower()
 
-    def measure(self) -> int:
+    def measure(self, complete=False) -> int:
         """Return token estimate. Inline: measure body. Subdoc: return cached tokens."""
-        if self.is_inline:
+        if self.is_inline or complete:
             return self._measurer.measure(self.body)
         return self._cached_tokens
 
