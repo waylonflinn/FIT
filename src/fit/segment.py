@@ -11,7 +11,8 @@ if TYPE_CHECKING:
 
 
 class Segment:
-    """Encapsulates a single named section of the document."""
+    """Named section of a document, with inline/subdoc state and reduction behavior.
+    """
 
     def __init__(
         self,
@@ -22,6 +23,16 @@ class Segment:
         measurer: "Measurer",
         is_inline: bool,
     ):
+        """
+        Args:
+            name: Slug key; used as filename stem for subdocs.
+            heading: Raw heading or ruled line that opens this segment. Included verbatim in ``body``.
+            body: Full content for disk write (heading included). Immutable after construction.
+            blocks: Content blocks in document order. Empty for inline segments.
+            measurer: The Measurer implementation to use for token measurement.
+            is_inline: True if segment is rendered verbatim in the root document; False if replaced by a subdoc link.
+        """
+
         self.name = name
         self.heading = heading
         self.body = body  # immutable after construction
@@ -51,13 +62,13 @@ class Segment:
 
     @staticmethod
     def _is_code_block(block: str) -> bool:
-        """Return True if this block is a fenced code block."""
+        """True if block is a fenced code block."""
         stripped = block.strip()
         return stripped.startswith("```") and stripped.endswith("```") and stripped != "```"
 
     @staticmethod
     def _code_language(block: str) -> Optional[str]:
-        """Extract the language from a fenced code block info string. Returns None if not code."""
+        """Language identifier from a fenced code block info string. None if not a code block or no language."""
         stripped = block.strip()
         if not (stripped.startswith("```") and stripped.endswith("```") and stripped != "```"):
             return None
@@ -78,20 +89,39 @@ class Segment:
             return lang.lower()
 
     def measure(self, complete: bool = False) -> int:
-        """Return token estimate. Inline: measure body. Subdoc: return cached tokens."""
+        """Estimated token count for this segment when written.
+
+        For inline segments (or when ``complete=True``), returns token count for entire original text in the segment.
+        For subdoc segments, returns only the sum of token counts for remaining blocks (cached after each reduction).
+
+        Args:
+            complete: If True, always return token count for entire original text, regardless of inline/subdoc state.
+
+        Returns:
+            Estimated token count.
+        """
         if self.is_inline or complete:
             return self._measurer.measure(self.body)
         return self._cached_tokens
 
     @property
     def is_empty(self) -> bool:
-        """True if block list is empty."""
+        """True if the block list is empty."""
         return len(self.blocks) == 0
 
     def is_critical_reduce(self, threshold: int) -> bool:
-        """
-        Returns True if reducing at this threshold would eliminate all non-code blocks
-        (when _had_paragraph) or all code blocks (when _had_code). Does not mutate state.
+        """True if reducing at this threshold would eliminate the final non-code or final code blocks,
+        or if such a reduction has already occured.
+
+        Specifically: True if the segment originally had non-code blocks and reducing would
+        leave none, or originally had code blocks and reducing would leave none. Does not
+        mutate state.
+
+        Args:
+            threshold: Token threshold to test against.
+
+        Returns:
+            True if a critical reduction would occur at this threshold.
         """
         if not self._had_paragraph and not self._had_code:
             return False
@@ -125,10 +155,29 @@ class Segment:
         return paragraph_critical or code_critical
 
     def reduce(self, threshold: int, priority_languages: list[str] = None) -> int:
-        """
-        Remove blocks per priority algorithm until _cached_tokens < threshold.
-        Returns _cached_tokens. Returns 0 if threshold is zero or all blocks exhausted.
-        No-op if already empty.
+        """Remove blocks until the remaining token count falls below ``threshold``.
+
+        Applies a six-step priority algorithm. Removes blocks one by one, stopping as
+        soon as the token count drops below the threshold.
+
+        Block removal order:
+            1. Non-priority code blocks, in reverse document order.
+            2. Priority code blocks trimmed to one per language, processing languages
+               in reverse priority order (lowest first). Keeps the first document-order
+               occurrence of each language.
+            3. Priority code blocks removed in reverse priority order until only the
+               highest-priority language remains.
+            4. Non-code blocks removed in reverse document order until one remains.
+            5. The final code block.
+            6. All remaining blocks cleared; returns 0.
+
+        Args:
+            threshold: Target token count (exclusive upper bound).
+            priority_languages: Programming languages to preserve longest, ordered by priority
+                (index 0 = highest priority). Defaults to no priority languages.
+
+        Returns:
+            Sum of token counts of all remaining blocks, or 0 if threshold could not be reached.
         """
         if threshold == 0:
             self.blocks = []
@@ -173,6 +222,14 @@ class Segment:
             i -= 1
 
         # Step 2: Trim priority code to one-per-language, processing lowest priority first.
+        # BUG: Design specifies keeping the first document-order occurrence (i.e. removing
+        # from the end, highest index first). This loop removes lang_indices[-1] (the
+        # highest index / last occurrence) first, then pops it — leaving lang_indices[0]
+        # (the first occurrence) as the survivor. That matches the spec. However, removal
+        # of lang_indices[-1] shifts indices for all blocks after it; lang_indices is not
+        # rebuilt after each removal, so subsequent idx_to_remove values may be stale if
+        # blocks between them were removed in an earlier step. Low risk in practice (step 1
+        # only removes non-priority blocks), but worth verifying.
         for lang in reversed(langs):
             lang_norm = self._normalize_lang(lang)
             lang_indices = [
@@ -211,6 +268,8 @@ class Segment:
                 return self._cached_tokens
 
         # Step 5: Remove the final code block (if any).
+        # NOTE: Design specifies a single code block remains at this point. The loop
+        # handles 0 or 1 correctly but would silently over-remove if the invariant broke.
         code_indices = [idx for idx, b in enumerate(self.blocks) if self._is_code_block(b)]
         for idx in sorted(code_indices, reverse=True):
             _remove_block(idx)
@@ -224,7 +283,7 @@ class Segment:
 
     @staticmethod
     def _normalize_lang(lang: str) -> str:
-        """Normalize a language name for comparison."""
+        """Normalize a language name for comparison via pygments. Falls back to lowercasing."""
         try:
             from pygments.lexers import get_lexer_by_name
             from pygments.util import ClassNotFound
@@ -237,15 +296,29 @@ class Segment:
             return lang.lower()
 
     def demote_to_subdoc(self, blocks: list[str]) -> None:
-        """Transition inline segment to subdoc status. Recomputes _cached_tokens from scratch."""
+        """Transition this segment from inline to subdoc status.
+
+        Sets ``is_inline = False``, replaces ``blocks``, and recomputes ``_cached_tokens``
+        from scratch. Caller is responsible for producing ``blocks`` from ``body``
+        (typically via ``Document._parse_segment(segment.body)``).
+
+        Args:
+            blocks: Parsed content blocks for this segment's body.
+        """
         self.is_inline = False
         self.blocks = list(blocks)
         self._cached_tokens = sum(self._measurer.measure(b) for b in self.blocks)
 
     def serialize_inline_component(self) -> str:
-        """
-        Returns heading + inline component (current blocks joined) + subdoc link.
-        Token annotation uses measurer.measure(body) — immutable, stable across reduction.
+        """Inline portion of the root document entry for a subdoc segment.
+
+        Returns the current blocks (the inline component after reduction) joined together,
+        followed by a subdoc link with a token annotation. If all blocks have been removed,
+        emits just the heading and link. The Token count annotation is derived from the
+        segment's original contents.
+
+        Returns:
+            Heading + inline content + subdoc link, ready to splice into the root document.
         """
         token_count = self._measurer.measure(self.body)
         link = f"[{self.name}.md]({self.name}.md) (~{token_count} tokens)\n"
