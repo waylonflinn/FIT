@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class Document:
-    """Structured container for an ordered collection of Segments."""
+    """Parses a Markdown document into an ordered collection of Segments.
+    """
 
     def __init__(
         self,
@@ -31,6 +32,34 @@ class Document:
         min_segment_count: int = 3,
         inline_languages: list[str] | None = None,
     ):
+        """Parse a Markdown document into Segments. 
+        
+        Includes:
+
+        - segmentation target detection
+        - partitioning
+        - name generation
+        - inline/subdoc classification
+        - block splitting
+        - initial subdoc reduction
+
+        Args:
+            text: Raw Markdown document text.
+            measurer: Token count estimator, injected into each Segment.
+            soft_threshold: Token count below which a document is considered to fit without splitting.
+            hard_threshold: Upper token bound adopted when further reduction would eliminate
+                all prose or all code from any segment.
+            inline_threshold: Maximum token count for a segment's inline component.
+                Segments above this threshold are classified as subdocs.
+            inline_threshold_reduction_increment: Amount by which the inline threshold is
+                decremented each iteration of the reduction loop.
+            trivial_extension_threshold: Token allowance above a single paragraph that still
+                qualifies a segment as inline. Prevents splitting near-single-paragraph segments.
+            min_segment_count: Minimum number of segments required to attempt a split.
+                Documents that cannot produce this many segments are left unsplit.
+            inline_languages: Code block languages to preserve longest during subdoc reduction,
+                in priority order (index 0 = highest priority). None means no preference.
+        """
         self._soft_threshold = soft_threshold
         self._hard_threshold = hard_threshold
         self._inline_threshold = inline_threshold
@@ -39,7 +68,7 @@ class Document:
         self._min_segment_count = min_segment_count
         self._inline_languages = inline_languages  # None means no preference
 
-        self._segments = Document.parse(
+        self._segments = Document._parse(
             text,
             measurer,
             soft_threshold=soft_threshold,
@@ -59,7 +88,14 @@ class Document:
         return [s.name for s in self._segments]
 
     def measure(self) -> int:
-        """Sum segment.measure() + subdoc link overhead for each subdoc segment."""
+        """Estimated token count of the document as currently reduced.
+
+        Sums the token count of each segment's inline content, plus the cost of
+        the subdoc link line for each segment that has been classified as a subdoc.
+
+        Returns:
+            Total estimated token count.
+        """
         total = 0
         for seg in self._segments:
             total += seg.measure()
@@ -68,10 +104,19 @@ class Document:
         return total
 
     def is_satisfied(self, threshold: int) -> bool:
+        """True if the current token count is at or below ``threshold``.
+
+        Args:
+            threshold: cutoff for token count
+
+        Returns: 
+            Whether or not the document token count is below the ``threshold``.
+        """
         return self.measure() <= threshold
 
     @property
     def is_unsplittable(self) -> bool:
+        """True if the document produced fewer segments than the minimum required to split."""
         return len(self._segments) < self._min_segment_count
 
     # ------------------------------------------------------------------
@@ -79,7 +124,7 @@ class Document:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def parse(
+    def _parse(
         text: str,
         measurer: Measurer,
         soft_threshold: int = 3000,
@@ -90,7 +135,41 @@ class Document:
         min_segment_count: int = 3,
         inline_languages: list[str] | None = None,
     ) -> list[Segment]:
-        """Full parsing pipeline. Returns list of Segment objects."""
+        """Parse a Markdown document into an ordered list of Segments.
+
+        Runs the full pipeline: 
+
+        - segmentation target detection
+        - partitioning
+        - name generation
+        - inline/subdoc classification
+        - block splitting
+        - initial subdoc reduction
+        
+        Called by ``__init__``; also callable directly
+        for testing.
+
+        If no headings or ruled lines are found, returns a single inline Segment
+        containing the full document text.
+
+        Args:
+            text: Raw Markdown document text.
+            measurer: Token count estimator, injected into each Segment.
+            soft_threshold: See ``__init__``.
+            hard_threshold: See ``__init__``.
+            inline_threshold: See ``__init__``.
+            inline_threshold_reduction_increment: See ``__init__``.
+            trivial_extension_threshold: See ``__init__``.
+            min_segment_count: See ``__init__``.
+            inline_languages: See ``__init__``.
+
+        Returns:
+            Segments in document order, each with measurer injected and initial
+            reduction applied.
+        """
+        # Skipped from docstring:
+        # - Link overhead precomputation (seg._link_overhead): set on each segment after construction,
+        #   used by Document.measure(). Not relevant to parse() callers.
         md = MarkdownIt().enable("table")
         tokens = md.parse(text)
         lines = text.split("\n")
@@ -165,7 +244,7 @@ class Document:
 
     @staticmethod
     def _slugify(heading: str) -> str:
-        """Convert heading text to a filesystem-safe slug."""
+        """Filesystem-safe slug from heading text. Returns empty string if no slug-able characters remain."""
         text = heading.lstrip("#").strip()
         if not text:
             return ""
@@ -182,13 +261,10 @@ class Document:
 
     @staticmethod
     def _assign_names(segments_data: list) -> list[str]:
-        """
-        Generate a name for each segment in segments_data.
+        """Generate a name for each entry in segments_data.
 
-        Rules: rule_01, rule_02, ...
-        Blank/empty slugs: heading_NN where NN is the overall heading count at that point.
-        Unique slugs: bare slug.
-        Duplicate slugs: slug_01, slug_02, ...
+        Ruled lines → ``rule_NN``. Empty slugs → ``heading_NN``. Unique slugs → bare slug.
+        Duplicate slugs suffixed with a zero-padded counter starting at ``01``.
         """
         # Pre-scan: count slug frequency for heading segments
         slug_freq: dict[str, int] = {}
@@ -219,10 +295,16 @@ class Document:
 
     @staticmethod
     def _find_segmentation_target(tokens, min_segment_count: int):
-        """
-        Find the segmentation target level.
-        Returns (level, type) where type is 'heading' or 'rule'.
-        level is 1-6 for headings, or 0 for rules.
+        """Determine the heading level or rule type to split on.
+
+        Scans H1–H6 in order, counting headings at each level plus all levels above.
+        Returns the first level where that cumulative count meets ``min_segment_count``.
+        Falls back to ruled lines, then to the deepest heading level found (with a warning).
+
+        Returns:
+            ``(level, type)`` where ``type`` is ``'heading'`` or ``'rule'``,
+            and ``level`` is 1–6 for headings or 0 for rules.
+            ``(None, None)`` if no headings or ruled lines exist.
         """
         heading_counts = {i: 0 for i in range(1, 7)}
         rule_count = 0
@@ -264,9 +346,11 @@ class Document:
 
     @staticmethod
     def _segment_document(text: str, lines: list[str], tokens, target_level, target_type):
-        """
-        Partition document into segments at target_level.
-        Returns list of (heading, body, seg_type) tuples.
+        """Partition the document at the target heading level or ruled lines.
+
+        Returns:
+            List of ``(heading, body, seg_type)`` tuples in document order,
+            where ``seg_type`` is ``'heading'`` or ``'rule'``.
         """
         if target_level is None and target_type is None:
             return []
@@ -314,7 +398,7 @@ class Document:
 
     @staticmethod
     def _find_first_paragraph(body: str, md) -> Optional[str]:
-        """Find the first paragraph text in the segment body. Returns None if not found."""
+        """First paragraph text in the segment body, or None if not found."""
         tokens = md.parse(body)
         lines = body.split("\n")
 
@@ -328,10 +412,17 @@ class Document:
 
     @staticmethod
     def _parse_segment(body: str) -> list[str]:
-        """
-        Split a segment body into top-level blocks.
-        Uses next_start slicing to preserve inter-block blank lines.
-        Block text is NEVER stripped.
+        """Split a segment body string into an ordered list of top-level blocks.
+
+        A block is one top-level structural unit: a paragraph, fenced code block, list,
+        blockquote, table, etc. Nested content is not surfaced as separate blocks.
+
+        Blank lines between blocks are preserved by slicing each block up to the start
+        of the next block rather than to its own end line. Block text is never stripped —
+        trailing whitespace is load-bearing for faithful reconstruction of the segment body.
+
+        Returns:
+            Blocks in document order. Returns ``[body]`` if no block structure is detected.
         """
         md = MarkdownIt().enable("table")
         tokens = md.parse(body)

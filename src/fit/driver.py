@@ -29,9 +29,32 @@ def process_file(
     verbose: bool = False,
     is_root: bool = False,
 ) -> list[Path]:
-    """
-    Process a single file. Returns list of new subdoc paths created.
-    is_root is a placeholder parameter for future use.
+    """Process a single Markdown file through the FIT pipeline.
+
+    Applies a coarse token count gate before constructing a Document. Skips
+    files that already fit within the soft threshold. Skips files that cannot
+    be split into enough segments. Otherwise runs the reduction loop and writes
+    output.
+
+    Args:
+        path: Path to the Markdown file to process.
+        soft_threshold: Token count below which the file is skipped without processing.
+        hard_threshold: Upper token bound adopted when further reduction would eliminate
+            all prose or all code from any segment.
+        inline_threshold: Maximum token count for a segment's inline component.
+        inline_threshold_reduction_increment: Amount by which the inline threshold is
+            decremented each iteration of the reduction loop.
+        trivial_extension_threshold: Token allowance above a single paragraph that still
+            qualifies a segment as inline.
+        min_segment_count: Minimum number of segments required to attempt a split.
+        inline_languages: Code block languages to preserve longest during subdoc reduction,
+            in priority order (index 0 = highest priority). None means no preference.
+        dry_run: If True, print planned write actions without touching the filesystem.
+        verbose: If True, log additional detail during writing.
+        is_root: Placeholder for future use. Has no current effect.
+
+    Returns:
+        List of subdoc paths created. Empty if the file was skipped or unsplittable.
     """
     path = Path(path)
     text = path.read_text(encoding="utf-8")
@@ -84,10 +107,37 @@ def _reduction_loop(
     inline_threshold_reduction_increment: int = 100,
     inline_languages: list[str] | None = None,
 ) -> list[Path]:
+    """Iteratively reduce the document until it satisfies the token threshold.
+
+    Each iteration decrements the inline threshold and runs three sequential steps:
+
+    - **Demotion:** Any inline segment whose body now exceeds the new inline threshold
+      is converted to a subdoc and immediately reduced to the new threshold.
+    - **Scan:** While still on the soft threshold, checks each segment for a critical
+      reduction condition. If found, permanently switches to the hard threshold.
+    - **Reduce:** Reduces each non-empty subdoc segment to the current inline threshold.
+
+    Writes and returns when the document satisfies the active threshold. Also writes
+    (with a warning) if all subdoc blocks have been exhausted without satisfying it.
+
+    Args:
+        doc: Parsed Document to reduce.
+        writer: Writer or DryRunWriter instance used to write output.
+        source_path: Path to the original source file; passed through to the writer.
+        soft_threshold: Initial target token count.
+        hard_threshold: Fallback target adopted on critical reduce detection.
+        inline_threshold: Starting inline threshold, decremented each iteration.
+        inline_threshold_reduction_increment: Amount to decrement per iteration.
+        inline_languages: Priority language list passed to each segment's reduce call.
+
+    Returns:
+        List of subdoc paths written.
     """
-    Outer reduction loop. Decrements inline threshold each iteration.
-    Runs scan + reduce passes. Switches to hard threshold on critical reduce detection.
-    """
+    # NOTE: The demotion block below accesses seg._measurer directly and calls
+    # Document._parse_segment() — both private. It also calls seg.demote_to_subdoc(),
+    # which was flagged as a code smell during Segment documentation. This whole
+    # demotion section is a known refactor candidate; the tight coupling between
+    # driver, Document, and Segment here has been noted since the design phase.
     current_threshold = soft_threshold
     current_inline_threshold = inline_threshold
     hard_threshold_adopted = False

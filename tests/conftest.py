@@ -57,7 +57,7 @@ def small_args(default_args):
 
 def make_doc(text: str, args, measurer: Measurer) -> list[Segment]:
     """Call Document.parse and return the result as a list."""
-    return Document.parse(
+    return Document._parse(
         text,
         measurer,
         soft_threshold=args.soft_threshold,

@@ -52,6 +52,8 @@ _lines {{ init.lineno }}–{{ init.endlineno }}_
 {%- endif %}
 
 {%- if ns2.has_params %}
+
+**Args:**
 {%- for section in init.docstring.parsed %}
 {%- if section.kind.value == "parameters" %}
 {% for param in section.value %}
@@ -100,6 +102,8 @@ _lines {{ method.lineno }}–{{ method.endlineno }}_
 {%- endif %}
 
 {%- if ns2.has_params %}
+
+**Args:**
 {%- for section in method.docstring.parsed %}
 {%- if section.kind.value == "parameters" %}
 {% for param in section.value %}
