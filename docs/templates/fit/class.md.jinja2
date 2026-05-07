@@ -1,3 +1,4 @@
+{%- import "fit/macros.jinja2" as macros -%}
 # {{ obj.name }}
 `forge/fit/{{obj.relative_filepath}}` · _lines {{ obj.lineno }}–{{ obj.endlineno }}_
 
@@ -26,11 +27,10 @@
 {%- set init = obj.members.get('__init__') %}
 {%- if init %}
 
-## Constructor
-_lines {{ init.lineno }}–{{ init.endlineno }}_
+## Constructor · _lines {{ init.lineno }}–{{ init.endlineno }}_
 
 ```python
-{{ obj.name }}({% for p in init.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
+{{ macros.render_sig(obj.name, init.parameters) }}
 ```
 {%- if init.docstring %}
 {%- for section in init.docstring.parsed %}
@@ -64,6 +64,46 @@ _lines {{ init.lineno }}–{{ init.endlineno }}_
 {%- endif %}
 {%- endif %}
 
+{%- set ns = namespace(has_properties=false) %}
+{%- for name, member in obj.members.items() %}
+{%- if not member.is_alias and "property" in member.labels and not name.startswith('_') %}
+{%- set ns.has_properties = true %}
+{%- endif %}
+{%- endfor %}
+{%- if ns.has_properties %}
+
+## Properties
+{%- for name, member in obj.members.items() %}
+{%- if not member.is_alias and "property" in member.labels and not name.startswith('_') %}
+
+### {{ member.name }} · _lines {{ member.lineno }}–{{ member.endlineno }}_
+
+```python
+{{ member.name }} -> {{ member.annotation }}
+```
+{%- if member.docstring %}
+{%- for section in member.docstring.parsed %}
+{%- if section.kind.value == "text" %}
+
+{{ section.value }}
+
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- if member.docstring %}
+{%- for section in member.docstring.parsed %}
+{%- if section.kind.value == "returns" %}
+{%- for ret in section.value %}
+**Returns:** {{ ret.description }}
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
 {%- set ns = namespace(has_methods=false) %}
 {%- for name, member in obj.members.items() %}
 {%- if member.kind.value == "function" and not name.startswith('_') %}
@@ -76,11 +116,10 @@ _lines {{ init.lineno }}–{{ init.endlineno }}_
 {%- for name, method in obj.members.items() %}
 {%- if method.kind.value == "function" and not name.startswith('_') %}
 
-### {{ method.name }}
-_lines {{ method.lineno }}–{{ method.endlineno }}_
+### {{ method.name }} · _lines {{ method.lineno }}–{{ method.endlineno }}_
 
 ```python
-{{ method.name }}({% for p in method.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}) -> {{ method.returns }}
+{{ macros.render_sig(method.name, method.parameters) }} -> {{ method.returns }}
 ```
 {%- if method.docstring %}
 {%- for section in method.docstring.parsed %}

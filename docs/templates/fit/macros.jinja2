@@ -1,0 +1,36 @@
+{%- macro render_sig(prefix, parameters) -%}
+{%- set ns = namespace(args=[]) -%}
+{%- for p in parameters -%}
+  {%- if p.name != "self" -%}
+    {%- if p.default -%}
+      {%- set ns.args = ns.args + [p.name ~ ": " ~ p.annotation ~ " = " ~ p.default] -%}
+    {%- else -%}
+      {%- set ns.args = ns.args + [p.name ~ ": " ~ p.annotation] -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- set flat = prefix ~ "(" ~ ns.args | join(", ") ~ ")" -%}
+{%- if flat | length <= 100 -%}
+{{ flat }}
+{%- else -%}
+{%- set indent = namespace(val="") -%}
+{%- for i in range(prefix | length + 1) -%}{%- set indent.val = indent.val ~ " " -%}{%- endfor -%}
+{%- set groups = namespace(lines=[]) -%}
+{%- set buf = namespace(items=[], width=0) -%}
+{%- for arg in ns.args -%}
+  {%- set sep_cost = 2 if buf.items | length > 0 else 0 -%}
+  {%- set new_width = buf.width + sep_cost + (arg | length) -%}
+  {%- if (buf.items | length > 0 and new_width + (indent.val | length) > 100) -%}
+    {%- set groups.lines = groups.lines + [buf.items | join(", ")] -%}
+    {%- set buf.items = [] -%}
+    {%- set buf.width = 0 -%}
+  {%- endif -%}
+  {%- set buf.items = buf.items + [arg] -%}
+  {%- set buf.width = buf.width + sep_cost + (arg | length) -%}
+{%- endfor -%}
+{%- if buf.items -%}
+  {%- set groups.lines = groups.lines + [buf.items | join(", ")] -%}
+{%- endif -%}
+{{ prefix }}({{ groups.lines | join(",\n" ~ indent.val) }})
+{%- endif -%}
+{%- endmacro -%}

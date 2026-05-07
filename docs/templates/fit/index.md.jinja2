@@ -9,6 +9,8 @@
 {%- endfor -%}
 {{ (ns.chars*1.6 / 4) | int }}
 {%- endmacro -%}
+
+{%- import "fit/macros.jinja2" as macros -%}
 # fit API
 
 {%- if obj.docstring %}
@@ -48,12 +50,12 @@
 ```python
 {%- set init = cls.members.get('__init__') %}
 {%- if init %}
-{{ cls.name }}({% for p in init.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %})
+{{ macros.render_sig(cls.name, init.parameters) }}
 {% endif -%}
 
 {%- for name, method in cls.members.items() %}
 {%- if method.kind.value == "function" and not name.startswith('_') %}
-{{ cls.name }}.{{ method.name }}({% for p in method.parameters %}{% if p.name != "self" %}{{ p.name }}: {{ p.annotation }}{% if p.default and p.default != "None" %} = {{ p.default }}{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}) -> {{ method.returns }}
+{{ macros.render_sig(cls.name ~ "." ~ method.name, method.parameters) }} -> {{ method.returns }}
 {% endif -%}
 {%- endfor %}
 ```
