@@ -50,12 +50,13 @@ class Writer:
         backup_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
 
         # Step 2: Assemble root document
+        folder = source_path.stem
         root_parts = []
         for seg in document:
             if seg.is_inline:
                 root_parts.append(seg.body)
             else:
-                root_parts.append(seg.serialize_inline_component())
+                root_parts.append(seg.serialize_inline_component(folder=folder))
 
         root_content = "".join(root_parts)
         self.log(f"Writing root: {source_path}")

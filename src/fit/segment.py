@@ -309,19 +309,25 @@ class Segment:
         self.blocks = list(blocks)
         self._cached_tokens = sum(self._measurer.measure(b) for b in self.blocks)
 
-    def serialize_inline_component(self) -> str:
+    def serialize_inline_component(self, folder: str = "") -> str:
         """Inline portion of the root document entry for a subdoc segment.
 
         Returns the current blocks (the inline component after reduction) joined together,
         followed by a subdoc link with a token annotation. If all blocks have been removed,
-        emits just the heading and link. The Token count annotation is derived from the
+        emits just the heading and link. The token count annotation is derived from the
         segment's original contents.
+
+        Args:
+            folder: Directory prefix for the subdoc link (typically the source file stem).
+                If non-empty, the link href becomes ``folder/name.md``; the link text
+                remains ``name.md``. If empty, the link is bare (``name.md``).
 
         Returns:
             Heading + inline content + subdoc link, ready to splice into the root document.
         """
         token_count = self._measurer.measure(self.body)
-        link = f"[{self.name}.md]({self.name}.md) (~{token_count} tokens)\n"
+        href = f"{folder}/{self.name}.md" if folder else f"{self.name}.md"
+        link = f"[{href}]({href}) (~{token_count} tokens)\n"
         if self.blocks:
             inline_content = "".join(self.blocks)
             if not inline_content.endswith("\n"):

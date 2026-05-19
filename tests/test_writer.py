@@ -101,8 +101,32 @@ class TestWriter:
         writer = Writer()
         writer.write(doc, source)
         root_content = source.read_text()
-        # Root should contain the link
-        assert f"{subdoc_seg.name}.md" in root_content
+        # Root should contain the folder-prefixed link: [doc/<name>.md](doc/<name>.md)
+        assert f"[doc/{subdoc_seg.name}.md](doc/{subdoc_seg.name}.md)" in root_content
+
+    def test_W03b_subdoc_link_uses_source_stem_as_folder(self, tmp_path):
+        """W-03b: Subdoc link text and href both use source file stem as folder prefix."""
+        args = self._make_args(inline_threshold=50)
+        content = (
+            self._make_subdoc_content("## Alpha") + "\n" +
+            self._make_subdoc_content("## Beta")
+        )
+        # Use a different stem to confirm it's derived from source, not hardcoded
+        source = tmp_path / "overview.md"
+        source.write_text(content)
+
+        m = Measurer()
+        doc = Document(content, m, **{k: v for k, v in vars(args).items() if k != 'dry_run'})
+        subdoc_segs = [s for s in doc if not s.is_inline]
+        if not subdoc_segs:
+            pytest.skip("No subdoc segments in this doc configuration")
+
+        writer = Writer()
+        writer.write(doc, source)
+        root_content = source.read_text()
+
+        for seg in subdoc_segs:
+            assert f"[overview/{seg.name}.md](overview/{seg.name}.md)" in root_content
 
     def test_W04_subdoc_files_written_to_source_stem_dir(self, tmp_path):
         """W-04: Subdoc files written to <source_stem>/ directory."""

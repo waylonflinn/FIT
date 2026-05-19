@@ -243,3 +243,117 @@ class TestMinSegmentCountLowerBound:
         source.write_text("## A\n\nContent.\n")
         # Should not raise on parse; will skip (file fits)
         main(["generate", "--min-segment-count", "2", str(source)])
+
+
+# ---------------------------------------------------------------------------
+# _update_link_token_count — recursive token patching
+# ---------------------------------------------------------------------------
+
+class TestUpdateLinkTokenCount:
+    """Tests for level1._update_link_token_count."""
+
+    def _import(self):
+        from fit.commands.generate.level1 import _update_link_token_count
+        return _update_link_token_count
+
+    def test_ULTC01_patches_token_count_in_parent(self, tmp_path):
+        """ULTC-01: Updates (~N tokens) in parent to match new child token count."""
+        _update_link_token_count = self._import()
+        m = Measurer()
+
+        # Write child file with known content
+        child_dir = tmp_path / "doc"
+        child_dir.mkdir()
+        child_path = child_dir / "Overview.md"
+        child_content = "## Overview\n\nSmall content after split.\n"
+        child_path.write_text(child_content)
+        new_count = m.measure(child_content)
+
+        # Write parent with a stale token count
+        parent_path = tmp_path / "doc.md"
+        stale_count = new_count + 500
+        parent_content = (
+            f"## Overview\n\n"
+            f"[doc/Overview.md](doc/Overview.md) (~{stale_count} tokens)\n"
+        )
+        parent_path.write_text(parent_content)
+
+        _update_link_token_count(parent_path, child_path)
+
+        updated = parent_path.read_text()
+        assert f"(~{new_count} tokens)" in updated
+        assert f"(~{stale_count} tokens)" not in updated
+
+    def test_ULTC02_no_match_logs_warning_does_not_raise(self, tmp_path, caplog):
+        """ULTC-02: No matching link in parent → logs warning, does not raise."""
+        import logging
+        _update_link_token_count = self._import()
+
+        child_dir = tmp_path / "doc"
+        child_dir.mkdir()
+        child_path = child_dir / "Missing.md"
+        child_path.write_text("## Missing\n\nContent.\n")
+
+        parent_path = tmp_path / "doc.md"
+        parent_path.write_text("## Something\n\nNo link to Missing here.\n")
+        original = parent_path.read_text()
+
+        with caplog.at_level(logging.WARNING):
+            _update_link_token_count(parent_path, child_path)
+
+        # Parent unchanged
+        assert parent_path.read_text() == original
+
+    def test_ULTC03_recursive_run_updates_parent_token_count(self, tmp_path):
+        """ULTC-03: fit generate --recurse updates stale token counts in root after subdoc split.
+
+        Creates a two-level hierarchy: root.md → root/section.md (large, will be split).
+        Runs generate --recurse and verifies the link in root.md is patched to the new count.
+        """
+        from fit.cli import main
+
+        # Build section content large enough to be split itself
+        section_body = (
+            "## Alpha\n\n" + "a" * 1500 + "\n\n"
+            "## Beta\n\n" + "b" * 1500 + "\n\n"
+            "## Gamma\n\n" + "c" * 1500 + "\n"
+        )
+        # Root references a section that is too large
+        root_content = (
+            "# Root Document\n\n"
+            "Intro paragraph.\n\n"
+            "## Overview\n\n" + "x" * 1500 + "\n\n"
+            "## Section\n\n" + "y" * 1500 + "\n\n"
+            "## Details\n\n" + "z" * 1500 + "\n"
+        )
+        root_path = tmp_path / "root.md"
+        root_path.write_text(root_content)
+
+        m = Measurer()
+
+        main([
+            "generate",
+            "--recurse",
+            "--soft-threshold", "500",
+            "--hard-threshold", "1000",
+            "--inline-threshold", "200",
+            "--min-segment-count", "2",
+            str(root_path),
+        ])
+
+        # root.md should now exist and contain links to root/
+        root_written = root_path.read_text()
+
+        # Find any subdoc links produced
+        import re
+        links = re.findall(r"\[root/(\S+\.md)\]\(root/(\S+\.md)\) \(~(\d+) tokens\)", root_written)
+        assert links, "Expected at least one subdoc link in root.md"
+
+        for link_text, href, token_str in links:
+            child_path = tmp_path / "root" / href
+            if child_path.exists():
+                actual_count = m.measure(child_path.read_text())
+                assert int(token_str) == actual_count, (
+                    f"Token count mismatch for root/{href}: "
+                    f"link says {token_str}, file has {actual_count}"
+                )

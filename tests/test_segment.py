@@ -576,6 +576,37 @@ class TestSerializeInlineComponent:
         assert f"(~{token_count} tokens)" in result
         assert "Overview.md" in result
 
+    def test_SIC01b_link_includes_folder_prefix(self, measurer):
+        """SIC-01b: When folder is provided, both link text and href are folder/name.md."""
+        body = "## Overview\n\nSome content.\n" + "x" * 400
+        blocks = Document._parse_segment(body)
+        seg = Segment(
+            name="Overview",
+            heading="## Overview",
+            body=body,
+            blocks=blocks,
+            measurer=measurer,
+            is_inline=False,
+        )
+        result = seg.serialize_inline_component(folder="doc")
+        assert "[doc/Overview.md](doc/Overview.md)" in result
+
+    def test_SIC01c_link_bare_without_folder(self, measurer):
+        """SIC-01c: When folder is empty (default), link text and href are both name.md."""
+        body = "## Overview\n\nSome content.\n" + "x" * 400
+        blocks = Document._parse_segment(body)
+        seg = Segment(
+            name="Overview",
+            heading="## Overview",
+            body=body,
+            blocks=blocks,
+            measurer=measurer,
+            is_inline=False,
+        )
+        result = seg.serialize_inline_component()
+        assert "[Overview.md](Overview.md)" in result
+        assert "doc/" not in result
+
     def test_SIC02_token_annotation_uses_body_measure_stable_after_reduce(self, measurer):
         """SIC-02: Token annotation uses measurer.measure(body), stable across reduction."""
         body = "## Overview\n\nSome content.\n" + "x" * 400
