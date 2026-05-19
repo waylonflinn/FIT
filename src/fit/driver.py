@@ -94,6 +94,7 @@ def process_file(
         inline_threshold=inline_threshold,
         inline_threshold_reduction_increment=inline_threshold_reduction_increment,
         inline_languages=inline_languages,
+        backup=is_root,
     )
 
 
@@ -106,6 +107,7 @@ def _reduction_loop(
     inline_threshold: int = 600,
     inline_threshold_reduction_increment: int = 100,
     inline_languages: list[str] | None = None,
+    backup: bool = True,
 ) -> list[Path]:
     """Iteratively reduce the document until it satisfies the token threshold.
 
@@ -129,6 +131,8 @@ def _reduction_loop(
         inline_threshold: Starting inline threshold, decremented each iteration.
         inline_threshold_reduction_increment: Amount to decrement per iteration.
         inline_languages: Priority language list passed to each segment's reduce call.
+        backup: Passed through to ``writer.write()``. False for recursively-processed
+            subdoc files to avoid backup files in subdirectories.
 
     Returns:
         List of subdoc paths written.
@@ -144,7 +148,7 @@ def _reduction_loop(
 
     # Check if already satisfied after initial _parse (step 6 reduction)
     if doc.is_satisfied(current_threshold):
-        return writer.write(doc, source_path)
+        return writer.write(doc, source_path, backup=backup)
 
     while True:
         # Decrement inline threshold for this iteration
@@ -171,7 +175,7 @@ def _reduction_loop(
 
             if hard_threshold_adopted:
                 if doc.is_satisfied(current_threshold):
-                    return writer.write(doc, source_path)
+                    return writer.write(doc, source_path, backup=backup)
 
         # Pass 2: Reduce
         for seg in doc:
@@ -180,7 +184,7 @@ def _reduction_loop(
 
         # Check satisfaction
         if doc.is_satisfied(current_threshold):
-            return writer.write(doc, source_path)
+            return writer.write(doc, source_path, backup=backup)
 
         # Check if all segments are empty (link-only)
         all_empty = all(seg.is_inline or seg.is_empty for seg in doc)
@@ -189,11 +193,11 @@ def _reduction_loop(
                 f"{source_path}: all segment blocks exhausted but document still exceeds threshold; "
                 "writing link-only document."
             )
-            return writer.write(doc, source_path)
+            return writer.write(doc, source_path, backup=backup)
 
         # Safety: if inline threshold has gone very low, avoid infinite loop
         if current_inline_threshold <= 0:
             logger.warning(
                 f"{source_path}: inline threshold exhausted without satisfying target; writing anyway."
             )
-            return writer.write(doc, source_path)
+            return writer.write(doc, source_path, backup=backup)

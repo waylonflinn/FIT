@@ -38,7 +38,7 @@ class TestWriter:
         )
 
     def test_W01_backup_written_before_output(self, tmp_path):
-        """W-01: Backup written as <filename>.unfit.<ext> before any output."""
+        """W-01: Backup written as <filename>.<ext>.unfit before any output."""
         # Use inline_threshold=600 (default) — content below threshold stays inline,
         # content above goes subdoc; force subdoc by using large content with threshold=50
         args = self._make_args(inline_threshold=50)
@@ -55,7 +55,7 @@ class TestWriter:
         writer = Writer()
         writer.write(doc, source)
 
-        backup = tmp_path / "overview.unfit.md"
+        backup = tmp_path / "overview.md.unfit"
         assert backup.exists()
         assert backup.read_text() == content
 
@@ -170,6 +170,38 @@ class TestWriter:
         result = writer.write(doc, source)
         assert isinstance(result, list)
         assert len(result) == subdoc_count
+
+    def test_W05b_backup_written_when_backup_true(self, tmp_path):
+        """W-05b: Backup file written when backup=True (default)."""
+        args = self._make_args(inline_threshold=50)
+        content = (
+            self._make_subdoc_content("## Alpha") + "\n" +
+            self._make_subdoc_content("## Beta")
+        )
+        source = tmp_path / "doc.md"
+        source.write_text(content)
+
+        m = Measurer()
+        doc = Document(content, m, **{k: v for k, v in vars(args).items() if k != 'dry_run'})
+
+        Writer().write(doc, source, backup=True)
+        assert (tmp_path / "doc.md.unfit").exists()
+
+    def test_W05c_no_backup_when_backup_false(self, tmp_path):
+        """W-05c: Backup file not written when backup=False (subdoc recursion case)."""
+        args = self._make_args(inline_threshold=50)
+        content = (
+            self._make_subdoc_content("## Alpha") + "\n" +
+            self._make_subdoc_content("## Beta")
+        )
+        source = tmp_path / "doc.md"
+        source.write_text(content)
+
+        m = Measurer()
+        doc = Document(content, m, **{k: v for k, v in vars(args).items() if k != 'dry_run'})
+
+        Writer().write(doc, source, backup=False)
+        assert not (tmp_path / "doc.md.unfit").exists()
 
     def test_W06_dry_run_writer_no_files_created(self, tmp_path, capsys):
         """W-06: DryRunWriter prints planned actions without writing any files."""

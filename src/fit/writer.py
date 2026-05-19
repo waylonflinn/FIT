@@ -32,22 +32,26 @@ class Writer:
         else:
             self.log = lambda *args, **kwargs: None # no-op
 
-    def write(self, document: Document, source_path: Path) -> list[Path]:
+    def write(self, document: Document, source_path: Path, backup: bool = True) -> list[Path]:
         """Write backup, root document, and subdoc files.
 
         Args:
             document: The split document to write.
             source_path: Path of the original source file.
+            backup: If True, write a ``<filename>.md.unfit`` backup before overwriting.
+                Pass False for recursively-processed subdoc files to avoid cluttering
+                subdirectories with backup files.
 
         Returns:
             Paths of subdoc files created.
         """
         source_path = Path(source_path)
 
-        # Step 1: Backup
-        backup_path = source_path.parent / f"{source_path.stem}.unfit{source_path.suffix}"
-        self.log(f"Backing up: {source_path} -> {backup_path}")
-        backup_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+        # Step 1: Backup (root file only by default)
+        if backup:
+            backup_path = source_path.parent / f"{source_path.stem}{source_path.suffix}.unfit"
+            self.log(f"Backing up: {source_path} -> {backup_path}")
+            backup_path.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
 
         # Step 2: Assemble root document
         folder = source_path.stem
@@ -92,12 +96,14 @@ class DryRunWriter:
 
         self.log = lambda message: print(f"[DRY RUN] {message}")
 
-    def write(self, document: Document, source_path: Path) -> list[Path]:
+    def write(self, document: Document, source_path: Path, backup: bool = True) -> list[Path]:
         """Print planned actions without writing any files.
 
         Args:
             document: The split document to preview.
             source_path: Path of the original source file.
+            backup: Accepted for interface compatibility with Writer; always logs the
+                backup action (DryRunWriter is only called at the root level).
 
         Returns:
             Empty list; no files are created.

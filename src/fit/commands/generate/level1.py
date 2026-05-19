@@ -47,10 +47,10 @@ def _update_link_token_count(parent_path: Path, child_path: Path) -> None:
         # Escaped href for regex safety.
         href_escaped = re.escape(href)
         pattern = re.compile(
-            r"(\[" + href_escaped + r"\]\(" + href_escaped + r"\) \(~)\d+( tokens\))"
+            r"(\[" + href_escaped + r"\]\(" + href_escaped + r"\) \(~)\d[\d,]*( tokens\))"
         )
         updated_text, count = pattern.subn(
-            rf"\g<1>{new_token_count}\g<2>",
+            rf"\g<1>{new_token_count:,}\g<2>",
             parent_text,
         )
 

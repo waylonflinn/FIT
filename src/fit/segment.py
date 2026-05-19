@@ -327,7 +327,7 @@ class Segment:
         """
         token_count = self._measurer.measure(self.body)
         href = f"{folder}/{self.name}.md" if folder else f"{self.name}.md"
-        link = f"[{href}]({href}) (~{token_count} tokens)\n"
+        link = f"[{href}]({href}) (~{token_count:,} tokens)\n"
         if self.blocks:
             inline_content = "".join(self.blocks)
             if not inline_content.endswith("\n"):

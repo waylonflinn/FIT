@@ -346,7 +346,7 @@ class TestUpdateLinkTokenCount:
 
         # Find any subdoc links produced
         import re
-        links = re.findall(r"\[root/(\S+\.md)\]\(root/(\S+\.md)\) \(~(\d+) tokens\)", root_written)
+        links = re.findall(r"\[root/(\S+\.md)\]\(root/(\S+\.md)\) \(~([\d,]+) tokens\)", root_written)
         assert links, "Expected at least one subdoc link in root.md"
 
         for link_text, href, token_str in links:
