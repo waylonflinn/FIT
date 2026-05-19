@@ -54,7 +54,7 @@ A command-line Python script that converts an arbitrarily large markdown documen
 - Out of scope: YAML/TOML front matter, HTML markdown, non-UTF-8 encodings, watch mode, batch processing
 
 Functional requirements explanation, configuration table and full details:
-→ [001_basic_mechanical/requirements.md](001_basic_mechanical/requirements.md) (~1418 tokens)
+→ [001_basic_mechanical/requirements.md](001_basic_mechanical/requirements.md) (~1,418 tokens)
 
 ---
 
