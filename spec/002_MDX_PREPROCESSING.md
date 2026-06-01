@@ -92,6 +92,14 @@ Tags indented by 4 spaces are parsed by markdown-it-py as `code_block` content a
 
 ---
 
+## Implementation
+
+Detailed plan covering the single-class `MdxDocument` design, phased fill-in order, file-by-file change set, and verification steps:
+
+→ [002_mdx_preprocessing/implementation-plan.md](002_mdx_preprocessing/implementation-plan.md)
+
+---
+
 ## Research
 
 ### Inspiration
