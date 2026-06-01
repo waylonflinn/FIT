@@ -30,15 +30,19 @@ Follow this procedure recursively down the tree.
 
 Follow this pattern when creating and editing documents that are likely to be read by an agent and loaded completely into context.
 
-The top level node is a reasonably sized (3k tokens or less) overview document that links to subdocuments that contain additional details.
-If one of those subdocuments subsequently grows too large, it becomes an overview with links to subdocuments.
+The top level node is a reasonably sized overview document that links to subdocuments that contain additional details. The top level document is not simply a bag of links. It should contain the most relevant and useful information, as well as the link to the subdocument with additional details. If one of those subdocuments subsequently grows too large, it becomes an overview with links to subdocuments. This can be formulated as a recursive process (and is implemented that way at lower FIT levels in this repository).
 
-Sub-documents are located in a folder named after the original document, lowercased and without the extension (e.g. `BERNARD.md` links to `bernard/model-candidates.md`)
-Links to subdocuments should use relative file paths in standard markdown link format where both the link text and target are the same. (e.g. [bernard/model-candidates.md](bernard/model-candidates.md))
-Links to subdocuments should also include a parenthetical token estimate after the link for smarter agent context management (e.g. (~1760 tokens)). May be estimated at ~4 chars per token.
+Sub-documents are located in a folder named after the original document, lowercased and without the extension (e.g. a top level document `BERNARD.md` links to a subdocument at `bernard/model-candidates.md`)
+Links to subdocuments should use relative file paths in standard markdown link format where both the link text and target are the same and should be prefixed with an '→' character (e.g.  → [bernard/model-candidates.md](bernard/model-candidates.md))
+Links to subdocuments should also include a parenthetical token estimate after the link for smarter agent context management (e.g. (~1,760 tokens)). May be estimated at ~4 chars per token.
+Links to subdocuments should be the last thing in a section (in markdown this corresponds to a heading level).
+Simple strategy for markdown files:
+- the highest (or second highest, whichever is most used) heading level in any document defines sections
+- when each section grows too large it becomes a candidate for creation of a subdocument
+- when turning a section into a subdocument retain in the top level document the information which is most important or relevant
+- put the full contents of the section in the subdocument
 
 Documents over 3k tokens should be refactored. Documents should never exceed 5k tokens.
-If the document is also a system file, also follow any other relevant guidelines for editing system files.
 
 # FIT Level
 A FIT can be constructed with increasing levels of capability (available intelligence) and a priori query and task knowledge.
