@@ -23,7 +23,7 @@ python3 -m venv .venv
 .venv/bin/pytest tests/test_document.py::test_foo   # single test
 
 # regenerate API docs (output is FIT-structured)
-PYTHONPATH=src .venv/bin/griffonner generate docs/pages/ --output docs/output --template-dir docs/templates
+PYTHONPATH=src .venv/bin/griffonner generate griffonner/pages/ --output docs --template-dir griffonner/templates
 ```
 
 `fit generate` writes in place. It backs up the original to `<name>.md.unfit` (root only — recursed subdocs are *not* backed up) before overwriting.
