@@ -17,3 +17,9 @@ fit = "fit.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "griffonner>=0.3.5",
+    "pytest>=9.0.3",
+]
