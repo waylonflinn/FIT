@@ -28,6 +28,12 @@ Follow this procedure recursively down the tree.
 
 ## How to Generate One? (Agentic Skill)
 
+> The full, current version of this skill lives at
+> [skills/fit-creation/SKILL.md](skills/fit-creation/SKILL.md) — including
+> per-repository threshold configuration (`.fit.toml`), born-fitted (Level 4)
+> authoring, and the splitting/maintenance procedures. The summary below is the
+> quick reference; on conflict, the skill file wins.
+
 Follow this pattern when creating and editing documents that are likely to be read by an agent and loaded completely into context.
 
 The top level node is a reasonably sized overview document that links to subdocuments that contain additional details. The top level document is not simply a bag of links. It should contain the most relevant and useful information, as well as the link to the subdocument with additional details. If one of those subdocuments subsequently grows too large, it becomes an overview with links to subdocuments. This can be formulated as a recursive process (and is implemented that way at lower FIT levels in this repository).
