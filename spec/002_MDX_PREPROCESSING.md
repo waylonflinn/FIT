@@ -12,13 +12,31 @@ _Status: Requirements (1/10)_
 
 _Requires: 001_
 
-_Updated: 2026-04-24_
+_Updated: 2026-07-13_
 
 ---
 
 ## Goal
 
-Mintlify documentation sources embed JSX components in markdown that the FIT generator cannot split correctly — structural tags create opaque token boundaries that prevent valid split points from being found. This spec adds a `fit preprocess` subcommand that normalizes Mintlify/MDX documents to standard CommonMark before generation, a guard in `fit generate` that detects and rejects unprocessed documents, and a softer warning in `fit measure`. Together these make the full pipeline — download → preprocess → generate — safe and explicit.
+Mintlify documentation sources embed JSX components in markdown. These
+components can make large regions opaque to markdown-it-py and prevent FIT from
+finding valid split points.
+
+This spec adds a `fit preprocess` subcommand that converts the supported
+Mintlify/MDX components to standard CommonMark before generation, a guard in
+`fit generate` that rejects unprocessed structural components, and warnings in
+`fit generate` and `fit measure` for lower-risk content wrappers. Together they
+make the pipeline — download → preprocess → generate — safe and explicit.
+
+This document is authoritative for MDX preprocessing and supersedes the
+preliminary MDX Extension notes recorded in spec 001. `Requires: 001` means the
+implemented Level 1 pipeline is a prerequisite; it does not make spec 001 part
+of this feature's normative requirements.
+
+Preprocessing is a normalization step, not summarization. It must preserve all
+human-readable body content and all semantic attributes named in the taxonomy.
+Formatting changes required to express that content as CommonMark are allowed;
+silent content loss is not.
 
 ---
 
@@ -26,75 +44,243 @@ Mintlify documentation sources embed JSX components in markdown that the FIT gen
 
 ### `fit preprocess <path>`
 
-- Operates in-place. Backs up the original as `<basename>.orig.md` before writing.
-- Processes all structural tags (hard blockers) and content-wrapper tags.
-- After preprocessing, the output file contains only standard CommonMark markdown — no JSX components.
-- Prints a summary of transformations applied (tag counts per type).
+- Operates on one file in place.
+- On a successful transformation, backs up the original as
+  `<stem>.orig<suffix>` (`guide.md` → `guide.orig.md`) before replacing it.
+- When a transformation is needed, refuses to overwrite an existing backup.
+  The source remains unchanged. A clean source may still report "no changes"
+  when an older backup exists because it requires no write.
+- Writes through a temporary file and atomically replaces the source only after
+  preprocessing and postcondition checks succeed.
+- If no transformation is needed, reports that result and creates no backup.
+- `--dry-run` performs parsing, transformation, validation, and reporting but
+  writes neither the backup nor the transformed source.
+- Processes every recognized structural and content-wrapper tag outside fenced
+  code blocks, including supported tags indented by four spaces.
+- On success, no recognized JSX tag or unknown JSX component remains. Standard
+  CommonMark raw HTML may remain.
+- Prints a stable summary containing opening-tag transformation counts, unknown
+  components, and diagnostics.
+- On malformed nesting, an unsupported recognized form, an unknown JSX
+  component, or a failed postcondition, exits nonzero and leaves the source and
+  backup unchanged.
+
+### Preservation invariant
+
+For every successful transformation:
+
+- Wrapper bodies retain their text, ordering, blank lines, fenced code, lists,
+  and other markdown. Only indentation or line prefixes needed by the target
+  CommonMark construct may change.
+- Semantic attributes explicitly named below (`title`, `body`, `name`, `type`,
+  and `required`) are rendered into the output rather than discarded.
+- Additional attributes explicitly classified as presentation-only by the
+  relevant `TagSpec` may be discarded, but their names are reported in the
+  summary. Any other unsupported attribute is a diagnostic and prevents the
+  write; the implementation must not guess whether an unknown value is
+  semantically meaningful.
+- Closing wrappers and presentation-only group wrappers contribute no content
+  and may be discarded.
+
+### Supported component syntax
+
+The source scanner recognizes components outside fenced code blocks. JSX-like
+text inside backtick or tilde fences is literal example content and must not be
+detected or transformed.
+
+Supported opening tags may:
+
+- span multiple lines;
+- contain attributes in any order;
+- use single- or double-quoted string values;
+- contain boolean attributes such as `required`; and
+- contain additional attributes explicitly allowed by the relevant `TagSpec`,
+  subject to the preservation rule above.
+
+Element names are case-sensitive, as in JSX. Each non-self-closing recognized
+wrapper must have a correctly nested matching close tag. Self-closing group and
+content wrappers are allowed only when they have no body. A self-closing tag
+that requires body content is rejected with a diagnostic.
+
+JSX expressions in attribute values, spread attributes, comments within an
+opening tag, and tags embedded mid-line in ordinary prose are unsupported in
+this iteration. Detection of one of these forms must fail safely rather than
+partially rewriting the file.
+
+Unknown JSX components are uppercase element names not present in the taxonomy.
+They are detected and reported, but not converted. Their presence prevents a
+successful `preprocess` write. Unknown lowercase tags are treated as standard
+raw HTML and remain unchanged.
 
 ### Tag taxonomy
 
-Two categories, matching the Extension in 001:
+There are 10 structural element types and 8 content-wrapper element types.
 
-**Structural — hard blockers** (affect split boundaries; `generate` aborts on detection):
-
-| Tag | Handling |
-|-----|----------|
-| `<section title="...">` / `</section>` | Convert open to heading at depth+1 relative to nearest preceding heading; discard close |
-| `<CodeGroup>` / `</CodeGroup>` | Discard wrapper; keep content blocks |
-| `<Tabs>` / `</Tabs>` | Discard wrapper; keep tab content blocks |
-| `<Tab title="...">` / `</Tab>` | Discard wrapper; keep content |
-| `<AccordionGroup>` / `</AccordionGroup>` | Discard group wrapper |
-| `<Accordion title="...">` / `</Accordion>` | Convert open to heading at depth+1; discard close |
-| `<Steps>` / `</Steps>` | Discard wrapper |
-| `<Step title="...">` / `</Step>` | Convert open to numbered list item; discard close |
-| `<CardGroup>` / `</CardGroup>` | Discard group wrapper |
-| `<Card title="...">` / `</Card>` | Convert open to heading at next lower level (cap at H6, drop heading if already H6); discard close |
-
-**Content wrappers — warn only** (unlikely to affect split quality; `generate` warns but does not abort):
+**Structural — hard blockers** (affect split boundaries; `generate` aborts):
 
 | Tag | Handling |
 |-----|----------|
-| `<Tip>`, `<Note>`, `<Warning>`, `<Info>`, `<Danger>` | Convert to blockquote with bold label: `> **Note:** ...` |
-| `</Tip>`, `</Note>`, `</Warning>`, `</Info>`, `</Danger>` | Discard close |
-| `<Frame>` / `</Frame>` | Discard wrapper; keep content |
-| `<ResponseField>` / `</ResponseField>` | Best-effort conversion (TBD at design time) |
-| `<ParamField>` / `</ParamField>` | Best-effort conversion (TBD at design time) |
+| `<section title="...">` | Replace the open tag with a heading one level below the active containing heading; use H2 when no heading is active. Discard the close tag. |
+| `<CodeGroup>` | Discard the wrapper and keep its complete body. |
+| `<Tabs>` | Discard the group wrapper and keep its complete body. |
+| `<Tab title="...">` | Replace the open tag with a heading one level below the active containing heading, preserving `title`; discard the close tag. |
+| `<AccordionGroup>` | Discard the group wrapper and keep its complete body. |
+| `<Accordion title="...">` | Replace the open tag with a heading one level below the active containing heading; discard the close tag. |
+| `<Steps>` | Discard the group wrapper and start a new counter at 1. |
+| `<Step title="...">` | Convert the complete element to one numbered list item. Render `title` in bold, then indent every body line as list-item content. |
+| `<CardGroup>` | Discard the group wrapper and keep its complete body. |
+| `<Card title="...">` | Replace the open tag with a heading one level below the active containing heading. If that would exceed H6, omit the heading marker but emit `title` as bold text. Discard the close tag. |
 
-### Guard in `fit generate`
+Synthetic heading depth is determined from the active CommonMark heading and
+the recognized wrapper stack, not merely from the last heading token anywhere
+in the file. Entering a heading-producing wrapper establishes that synthetic
+depth for nested components; leaving it restores the containing depth. When
+the active heading is H6, every heading-producing component preserves its title
+as bold paragraph text rather than emitting invalid H7 or silently dropping it.
 
-- Before constructing `Document`, scan raw text for structural tag patterns.
-- If any structural tag is found: print the tags found, recommend `fit preprocess`, exit nonzero.
-- `--force` bypasses the guard entirely.
-- Detection is regex against raw text (no parsing) — fast, no extra dependencies.
+**Content wrappers — warning only in guards:**
 
-### Guard in `fit measure`
+| Tag | Handling |
+|-----|----------|
+| `<Tip>`, `<Note>`, `<Warning>`, `<Info>`, `<Danger>` | Convert the complete element to a blockquote. Emit `> **Type:**`, then prefix every body line (including structural blank lines) so the entire body remains inside the quote. |
+| `<Frame>` | Discard the wrapper and keep its complete body. |
+| `<ResponseField name="..." type="...">` | Convert to a bullet whose label preserves `name` and `type`; indent the complete body beneath it. Consecutive response fields form one list. |
+| `<ParamField body="..." type="..." required>` | Convert to a bullet whose label preserves `body`, `type`, and whether `required` was present; indent the complete body beneath it. Consecutive parameter fields form one list. |
 
-- If structural tags are detected: print a warning that token counts may be slightly inaccurate.
-- Continue with measurement and print results normally.
-- No `--force` required.
+Blank lines between fields do not end a field run. Any intervening non-field
+content does. Parameter and response fields are separate runs.
+
+### Normative transformation examples
+
+Admonition bodies remain entirely quoted:
+
+````md
+<Note>
+First paragraph.
+
+```python
+print("preserved")
+```
+</Note>
+````
+
+becomes:
+
+````md
+> **Note:**
+>
+> First paragraph.
+>
+> ```python
+> print("preserved")
+> ```
+````
+
+Steps preserve multiline bodies as list-item content:
+
+```md
+<Steps>
+<Step title="Install">
+Run the command.
+
+- Keep this nested item.
+</Step>
+<Step title="Verify">Check the result.</Step>
+</Steps>
+```
+
+becomes:
+
+```md
+1. **Install**
+
+   Run the command.
+
+   - Keep this nested item.
+
+2. **Verify**
+
+   Check the result.
+```
+
+Field bodies are never summarized or dropped:
+
+```md
+<ParamField body="model" type="string" required>
+The model name.
+
+May contain a provider prefix.
+</ParamField>
+```
+
+becomes:
+
+```md
+- **model** (`string`, required)
+
+  The model name.
+
+  May contain a provider prefix.
+```
+
+### Consistently indented components
+
+A recognized component block consistently indented by four or more spaces is
+not treated as an intentional CommonMark code block. Before component
+transformation, remove the common wrapper indentation from the complete
+component extent. This covers the known indented `<CodeGroup>` instances in the
+primary Mintlify fixture.
+
+Fence recognition inside such a component is relative to the component's
+common indentation. An indented fence in its body remains literal fenced-code
+content, and JSX-looking examples inside it are neither detected nor converted.
+
+Mixed or inconsistent indentation within such an extent remains unsupported.
+It must produce a diagnostic and leave the source unchanged rather than allow a
+hard blocker to survive preprocessing.
+
+### Guard behavior
+
+Detection uses the shared source scanner and ignores fenced code. It does not
+need a markdown-it-py parse and introduces no additional dependency.
+
+| Command | Structural tags | Content wrappers | Unknown JSX |
+|---------|-----------------|------------------|-------------|
+| `fit generate` | List findings, recommend `fit preprocess`, exit nonzero | Warn and continue | List findings, recommend `fit preprocess`, exit nonzero |
+| `fit generate --force` | Bypass all MDX guard messages and continue | Bypass | Bypass |
+| `fit measure` | Warn, then print measurement normally | Warn, then print measurement normally | Warn, then print measurement normally |
+
+The `generate` guard runs before constructing `Document` or writing any backup
+or output file.
 
 ### Integration constraints
 
-- Tag detection logic lives in a shared module (`fit/mdx.py`) used by `preprocess`, `generate`, and `measure`.
-- The preprocessor is implemented as a proper library module integrated with existing `fit` patterns — not a transplant of the prototype code. Prototype findings (token-walk approach, heading depth tracking, line_map reconstruction, indented-tag discovery) inform the design; the prototype code is fungible.
-- Refactors to existing library modules are permitted where they enable clean integration.
-
-### Known issue (deferred)
-
-Tags indented by 4 spaces are parsed by markdown-it-py as `code_block` content and are invisible to the token walker. Discovered in prototype with two `<CodeGroup>` instances in `prompt-caching.md`. Correct fix is a source-level pre-pass that de-indents the block before parsing. This is out of scope for this spec — tracked as an Extension.
+- Scanning, parsing, transformation, findings, and postcondition validation
+  live in a shared library module (`fit/mdx.py`) used by `preprocess`,
+  `generate`, and `measure`.
+- The transformer operates on source spans and recognized wrapper pairs. A
+  top-level markdown-it token is not assumed to correspond to one MDX tag.
+- markdown-it-py may be used to identify CommonMark heading and fenced-code
+  ranges, but it is not the component parser: complete component regions often
+  arrive as one `html_block`, while one-line components often arrive as
+  `html_inline` children.
+- The filesystem wrapper is separate from the pure transformation library.
+- Refactors to existing library modules are permitted where they enable clean
+  integration. No `Document` or `Segment` change is expected.
 
 ### Out of scope
 
 - Recursive preprocessing (only one file at a time)
 - Downloading or fetching source documents
-- Any tag not listed in the taxonomy above
-- Handling mixed/inconsistent indentation in the de-indent pre-pass (deferred Extension)
+- Converting unknown JSX components
+- JSX expressions, spread attributes, or arbitrary JavaScript
+- Mixed/inconsistent indentation in an indented component extent
 
 ---
 
 ## Implementation
 
-Detailed plan covering the single-class `MdxDocument` design, phased fill-in order, file-by-file change set, and verification steps:
+Detailed design, file-by-file changes, phased order, and verification:
 
 → [002_mdx_preprocessing/implementation-plan.md](002_mdx_preprocessing/implementation-plan.md)
 
@@ -104,5 +290,7 @@ Detailed plan covering the single-class `MdxDocument` design, phased fill-in ord
 
 ### Inspiration
 
-- **mdx2md** (`github.com/icyJoseph/mdx2md`) — Rust library for converting MDX to standard markdown. Investigate: what tags does it handle, what's the conversion approach, is there anything reusable or worth adapting into the Python implementation?
-
+- **mdx2md** (`github.com/icyJoseph/mdx2md`) — Rust library for converting MDX
+  to standard markdown. This is optional implementation research, not a gate:
+  compare its supported syntax and preservation behavior before introducing a
+  new dependency or adapting an algorithm.

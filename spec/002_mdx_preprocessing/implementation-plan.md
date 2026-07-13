@@ -1,85 +1,244 @@
 # 002 MDX Preprocessing — Implementation Plan
 
-_Updated: 2026-05-26_
+_Updated: 2026-07-13_
 
 ## Context
 
-Spec 002 adds three things on top of the existing FIT pipeline: a `fit preprocess` subcommand, a guard in `fit generate` that refuses unprocessed MDX, and a softer warning in `fit measure`. All three need the same detection logic and share a tag taxonomy (14 structural + 7 content-wrapper tags). The prototype at `prototypes/mdx_preprocessor/mdx_preprocessor.py` already proves the token-walk + line-map approach against a real Mintlify document (`prompt-caching.md`), but covers only `<section>` and `<CodeGroup>` and is structured as a script — it's a reference, not a transplant.
+Spec 002 adds a `fit preprocess` subcommand, an aborting MDX guard in
+`fit generate`, and warnings in `fit generate` and `fit measure`. All three use
+one taxonomy: 10 structural element types and 8 content-wrapper element types.
+This plan and spec 002 are authoritative for the feature; the preliminary MDX
+Extension notes in historical spec 001 are not implementation instructions.
 
-The goal of this work is to ship the spec as a clean library module that the three commands share, with no required changes to `Document` or `Segment`.
+The prototype proves two useful ideas against a real Mintlify document:
+heading-depth context matters, and untouched markdown must be reconstructed from
+source ranges rather than normalized from parsed tokens. Its top-level
+`html_block` dispatch does not generalize to the full taxonomy, however:
+markdown-it-py can place an entire component tree in one `html_block`, while
+one-line components commonly appear as `html_inline` children. Production code
+therefore uses a source-span component scanner and treats the prototype as
+research rather than code to lift.
+
+No `Document` or `Segment` changes are expected. The preprocessor remains an
+upstream normalization step.
 
 ## Design
 
-**Single `MdxDocument` class** in `src/fit/mdx.py`:
+### Public surface
 
-- Constructor runs a cheap regex scan over the source and populates `structural_tags` / `content_wrapper_tags`. No markdown-it-py parse here — the `generate` guard and `measure` warning pay only the regex cost.
-- `preprocess()` runs the markdown-it-py token walk and applies handlers. Deferred until called, so callers that don't need it don't pay for it.
-- A module-level `TAGS: dict[str, TagSpec]` registry is the single source of truth, consumed both by the constructor's scan and by `preprocess`'s dispatch.
-- A `PreprocessContext` dataclass threads running state (heading depth, step counter, active `<ParamField>` / `<ResponseField>` list run) through pure handler functions.
+Keep a single user-facing `MdxDocument` class in `src/fit/mdx.py`:
 
-**`<ParamField>` / `<ResponseField>` handling: Option C (coalesced bullets).** Consecutive field tags become a single bullet list; the `field_run_tag` field on `PreprocessContext` marks the active run so the handler knows when to open and close it. Single-paragraph bodies fit naturally; multi-paragraph bodies are emitted as a bullet entry followed by indented continuation paragraphs (best-effort — the spec permits some loss).
+- Construction performs a cheap source scan and populates structural,
+  content-wrapper, and unknown-component findings.
+- `preprocess()` transforms and validates in memory. It performs no filesystem
+  writes and raises a domain-specific diagnostic error when safe conversion is
+  impossible.
+- `summary` is empty until `preprocess()` runs, then contains stable opening-tag
+  transformation counts, discarded presentation attributes, and diagnostics.
+- `format_findings()` is shared by all three commands.
 
-**No required `Document` or `Segment` changes.** The preprocessor sits upstream of `Document` construction; `Document` only ever sees CommonMark. The prototype's `top_level_tokens` and line-map slice helpers do conceptually overlap with `Document._parse_segment`, but the two have different outputs (text reconstruction vs. block list). Bundling them into a shared utility is YAGNI today; flag it as a candidate refactor only if a third caller appears.
+Internal dataclasses keep scanning and rendering explicit:
+
+- `TagSpec` — name, category, required/semantic attributes, self-closing policy,
+  and handler kind.
+- `SourceSpan` — start/end character offsets plus line/column information.
+- `ComponentNode` — matched open/close spans, parsed attributes, indentation,
+  and nested component children.
+- `ScanResult` — recognized roots, counts, fenced ranges, unknown components,
+  and diagnostics.
+- `RenderContext` — active heading depth and scoped step/field state.
+- `PreprocessDiagnostic` / `MdxPreprocessError` — stable errors suitable for CLI
+  output and unit assertions.
+
+Private scanner and renderer helpers may be separate classes if that makes
+state ownership clearer. `MdxDocument` remains the library facade; forcing all
+logic into one large class is not a goal.
+
+### Source scanner
+
+The scanner is a dependency-free, single forward pass over source text:
+
+1. Identify backtick and tilde fenced-code extents and exclude their contents
+   from component detection. Fence matching follows CommonMark marker character
+   and minimum-length rules. Within an indented recognized component, evaluate
+   fence indentation relative to that component's common indentation.
+2. Outside fences, recognize JSX tag boundaries with a quote-aware character
+   walk. Do not use one regex to parse a complete opening tag.
+3. Parse supported string and boolean attributes, retaining all attribute names
+   for preservation diagnostics.
+4. Pair non-self-closing tags with a stack, producing a nested component tree.
+5. Diagnose mismatched/unclosed tags, unsupported recognized forms, JSX
+   expressions/spreads, mid-line components, and unknown uppercase components.
+6. For recognized component roots indented by four or more spaces, compute and
+   validate common indentation across the complete extent. Record the amount to
+   remove during rendering. Mixed indentation is a hard diagnostic.
+
+Element matching is case-sensitive. Known lowercase `<section>` is recognized;
+unknown lowercase tags are raw HTML. Unknown uppercase names are JSX components
+and prevent preprocessing from writing.
+
+The cheap guard path uses this scanner but does not invoke markdown-it-py or the
+renderer. Scanning remains linear in source length.
+
+### Heading context
+
+After scanning succeeds, create a tag-masked copy of the source: replace JSX
+tag characters with spaces while preserving every newline and all body text.
+Parsing this copy with markdown-it-py exposes headings that would otherwise be
+hidden inside opaque HTML blocks while retaining source line numbers.
+
+Collect heading events from the masked parse and merge them with component
+open/close events during rendering. `RenderContext.heading_depth` starts as
+`None`; a synthetic heading uses H2 when no heading is active, otherwise one
+level below the active heading.
+
+Heading-producing components establish their synthetic depth while rendering
+their body. Closing the component restores the containing depth. Ordinary
+CommonMark headings inside the body update the active depth within that scope.
+At H6, every heading-producing component renders its title as bold paragraph
+text instead of emitting H7 or dropping the title, and reports the fallback in
+the summary.
+
+### Source-span rendering
+
+Render the component tree recursively. Copy all text outside component tag
+spans byte-identically. A handler receives the recursively rendered body, so it
+cannot accidentally discard nested components or opaque markdown.
+
+Handlers operate on complete elements rather than isolated open tags:
+
+- Group/transparent wrappers return their rendered body.
+- Heading wrappers emit the synthetic heading, then their rendered body.
+- Admonitions prefix every output line so blank lines, lists, and fenced code
+  remain within the blockquote.
+- Steps render the full body as a numbered list item and indent each body line
+  by three spaces. The counter is scoped to its containing `<Steps>` node.
+- Parameter/response fields render the full body as a bullet entry and indent
+  each body line by two spaces. Consecutive same-kind sibling fields, separated
+  only by whitespace, form one list.
+- Indentation normalization happens on the complete component extent before
+  handler-specific indentation is applied.
+
+Do not strip body strings. Helpers should distinguish structural whitespace
+introduced by wrappers from whitespace belonging to body content.
+
+### Postcondition validation
+
+After rendering, scan the result again:
+
+- any recognized component is a transformation failure;
+- any unknown uppercase JSX component is a transformation failure;
+- standard lowercase raw HTML is allowed; and
+- JSX-looking text inside fenced code remains ignored.
+
+The postcondition scan runs for normal and `--dry-run` preprocessing. The pure
+library method returns text only after it passes.
+
+### Filesystem transaction
+
+`commands/preprocess.py` owns all I/O:
+
+1. Validate that the source exists and is a regular UTF-8 file.
+2. Read source, transform, and validate completely in memory.
+3. If unchanged, report and return without writing, regardless of whether an
+   older backup exists.
+4. If a transformation is needed, refuse if the computed backup path exists.
+5. Under `--dry-run`, report and return without writing.
+6. Write the transformed result to a temporary file in the source directory,
+   flush it, and close it.
+7. Create the backup with exclusive-create semantics and write the exact
+   original bytes.
+8. Atomically replace the source with the staged transformed file.
+9. If commit fails after creating this invocation's backup, make a best-effort
+   rollback by deleting that new backup and retain the original source.
+
+Validation failures occur before step 6 and therefore cannot modify either
+path. Same-directory staging makes the final replacement atomic on the target
+filesystem.
 
 ## Files
 
-**New:**
+### New or already scaffolded
 
-- `src/fit/mdx.py` — `MdxDocument`, `TagSpec`, `TAGS`, `PreprocessContext`, per-tag handlers. Skeleton already in place; fill in implementations.
-- `src/fit/commands/preprocess.py` — argparse + I/O wrapper. Skeleton already in place.
-- `tests/test_mdx.py` — class-level tests for scan + preprocess. Already in place; will pass once `mdx.py` is implemented.
-- `tests/test_preprocess_command.py` — single smoke test: writes `<name>.orig.md` backup, overwrites the source, prints a summary. To be added.
+- `src/fit/mdx.py` — replace the placeholder token-walk design with the facade,
+  source scanner, tree renderer, taxonomy, findings, and diagnostics above.
+- `src/fit/commands/preprocess.py` — argparse and transactional filesystem
+  wrapper.
+- `tests/test_mdx.py` — revise existing examples to exact-output tests and add
+  scanner, nesting, preservation, and failure coverage.
+- `tests/test_preprocess_command.py` — command behavior, backup, dry-run,
+  collision, validation failure, and atomicity-facing tests.
+- `tests/test_mdx_guards.py` — generate/measure warning and abort matrix. This
+  may instead be split between existing command test modules if that better
+  matches the suite.
 
-**Modified:**
+### Modified
 
-- `src/fit/cli.py` — register the `preprocess` subparser (one import + one call, matching the existing `generate` / `measure` wiring on lines 20–24).
-- `src/fit/commands/measure.py` — after reading text, construct `MdxDocument(text)`; if `has_structural_tags` or `has_content_wrappers`, print the findings as a warning before the normal token-count line. No `--force` flag, no abort.
-- `src/fit/commands/generate/__init__.py` — add `--force` boolean argument.
-- `src/fit/commands/generate/level1.py` — before the BFS queue is constructed, read the root path's text, construct `MdxDocument(text)`; if `has_structural_tags` and not `args.force`, print findings + recommendation, raise `SystemExit(1)`.
-
-## Existing methods to reuse
-
-- `markdown_it.MarkdownIt().parse(source)` — already used by `Document`; the preprocessor uses the same parser for its token stream.
-- `fit.measurer.Measurer` — optional, for an informational before/after token count in the preprocess summary.
-- The `add_parser` / `run` convention from `src/fit/commands/measure.py` and `src/fit/commands/generate/__init__.py`. The new `preprocess.py` follows the same shape.
-- The prototype at `prototypes/mdx_preprocessor/mdx_preprocessor.py` is the reference implementation for the token walk, line-map reconstruction (`lines[token.map[0]:next_top.map[0]]`), and the heading-depth tracking pattern. Lift the algorithm; rewrite the structure into the registry+handlers shape.
+- `src/fit/cli.py` — register the `preprocess` subparser.
+- `src/fit/commands/measure.py` — scan after reading; warn for structural,
+  content-wrapper, or unknown JSX findings, then measure normally.
+- `src/fit/commands/generate/__init__.py` — add `--force`.
+- `src/fit/commands/generate/level1.py` — before constructing the BFS queue,
+  scan the root source. Without `--force`, abort for structural or unknown JSX
+  findings and warn for content wrappers. The guard must run before any FIT
+  backup or output write.
 
 ## Implementation phases
 
-Roughly the order to fill things in. Each phase keeps the test suite green where it can.
+Each phase should add focused tests and keep the completed portion green.
 
-1. **Registry skeleton** — populate `TAGS` with all 21 tags (14 structural + 7 content-wrapper), each with `open_re` / `close_re` and a `handler=None` placeholder where the handler isn't yet written. Constructor's scan can be fully implemented at this point.
-2. **Scanning** — implement `__init__`, `has_structural_tags`, `has_content_wrappers`, `format_findings`. `TestScan` in `tests/test_mdx.py` should pass after this phase.
-3. **Handlers (structural)** — implement handlers for `<section>`, `<CodeGroup>`, `<Tabs>`/`<Tab>`, `<Accordion>`/`<AccordionGroup>`, `<Steps>`/`<Step>`, `<Card>`/`<CardGroup>`. Heading-depth and step-counter logic comes from `PreprocessContext`.
-4. **Handlers (content)** — `<Tip>` / `<Note>` / `<Warning>` / `<Info>` / `<Danger>` → blockquote with bold label. `<Frame>` → discard wrapper. `<ParamField>` / `<ResponseField>` → coalesced bullet list (uses `field_run_tag` on the context).
-5. **Token walk** — implement `preprocess()`: parse with markdown-it-py, walk top-level tokens, classify each `html_block` against the registry, dispatch to the handler with the current context, reconstruct text via line-map slicing for non-tag blocks. Update `summary` per dispatch.
-6. **`preprocess` command** — flesh out `add_parser` (path arg, `--dry-run`, `--verbose`) and `run` (read → MdxDocument → preprocess → backup → overwrite → print summary).
-7. **CLI registration** — wire `preprocess` into `cli.py`.
-8. **Generate guard** — add `--force` to `commands/generate/__init__.py`; add the pre-queue check in `commands/generate/level1.py`.
-9. **Measure warning** — add the pre-measure check in `commands/measure.py`.
-10. **End-to-end verification** — run against `prototypes/mdx_preprocessor/prompt-caching.md`; diff the output against the existing `.preprocessed.md` reference (expect differences from the new tags handled, but the `<section>` and `<CodeGroup>` transformations should match).
+1. **Reconcile tests with the spec** — replace substring-only assertions with
+   exact expected output for the normative forms. Add explicit failing tests for
+   malformed and unsupported input.
+2. **Taxonomy and diagnostics** — populate all 18 `TagSpec` entries and define
+   stable finding/diagnostic formatting.
+3. **Fence-aware scanner** — implement source spans, quoted/boolean attributes,
+   unknown detection, stack pairing, and scan-only properties.
+4. **Indentation validation** — support consistently indented recognized
+   component extents and reject mixed indentation.
+5. **Heading events** — mask tag spans, parse headings with markdown-it-py, and
+   test scoped depth including H6 behavior.
+6. **Transparent and heading handlers** — section, groups, tabs, accordions, and
+   cards with recursive body preservation.
+7. **Container handlers** — exact multiline admonition, step, parameter-field,
+   and response-field rendering.
+8. **Postcondition validation** — rescan output and reject recognized/unknown
+   JSX survivors.
+9. **Preprocess command** — dry-run, unchanged path, collision-safe backup,
+   same-directory staging, atomic replacement, and summary.
+10. **CLI registration and guards** — implement the complete warning/abort
+    matrix and `--force` bypass.
+11. **Fixture verification** — copy the primary fixture to a temporary directory,
+    run preprocessing there, verify no recognized/unknown JSX remains, then run
+    `fit generate` successfully on the transformed copy.
 
 ## Verification
 
 ```bash
-.venv/bin/pytest tests/test_mdx.py -q                # unit tests for MdxDocument
-.venv/bin/pytest tests/ -q                           # full suite (no regressions in existing tests)
-
-# End-to-end smoke against the prototype's known-good input
-.venv/bin/fit preprocess prototypes/mdx_preprocessor/prompt-caching.md
-diff prototypes/mdx_preprocessor/prompt-caching.md \
-     prototypes/mdx_preprocessor/prompt-caching.preprocessed.md   # transformations should overlap
-
-# Guard behavior
-.venv/bin/fit generate prototypes/mdx_preprocessor/prompt-caching.orig.md  # expect: abort, listing tags
-.venv/bin/fit generate --force prototypes/mdx_preprocessor/prompt-caching.orig.md  # expect: proceed
-
-# Measure warning
-.venv/bin/fit measure prototypes/mdx_preprocessor/prompt-caching.orig.md   # expect: warning, then count
+.venv/bin/pytest tests/test_mdx.py -q
+.venv/bin/pytest tests/test_preprocess_command.py -q
+.venv/bin/pytest tests/test_mdx_guards.py -q
+.venv/bin/pytest tests/ -q
 ```
 
-## Out of scope (carried from spec 002)
+End-to-end verification must not modify the checked-in prototype fixture. Copy
+it and its expected reference to a pytest temporary directory or a shell-created
+temporary directory first. Verification should assert properties rather than
+requiring byte equality with the prototype output, because the production
+taxonomy is broader:
 
-- Indented tags (4-space code blocks). markdown-it-py parses them as `code_block` content; the token walker doesn't see the tag. Source-level de-indent pre-pass is deferred as an Extension.
-- Recursive preprocessing across linked files.
-- Tags outside the 21-tag taxonomy.
+- all recognized components are transformed;
+- unknown JSX is absent or produces a nonzero diagnostic;
+- the known indented `<CodeGroup>` instances are handled;
+- original body sentinel text remains in order;
+- a second preprocess reports no changes and creates no new backup; and
+- unforced `fit generate` accepts the successful preprocessed result.
+
+## Out of scope
+
+- Recursive preprocessing across linked files
+- Downloading source documents
+- Conversion rules for unknown JSX components
+- JSX expressions, spread attributes, comments inside opening tags, and
+  arbitrary JavaScript
+- Mixed or inconsistent indentation within an indented component extent
