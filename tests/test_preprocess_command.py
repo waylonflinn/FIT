@@ -13,7 +13,7 @@ def combined_output(capsys) -> str:
 
 
 class TestSuccessfulPreprocess:
-    def test_cli_writes_exact_backup_replaces_source_and_prints_summary(
+    def test_cli_writes_exact_backup_replaces_source_and_prints_concise_result(
         self, tmp_path, capsys
     ):
         source = tmp_path / "guide.md"
@@ -29,8 +29,22 @@ class TestSuccessfulPreprocess:
         )
         assert (tmp_path / "guide.orig.md").read_text(encoding="utf-8") == original
         output = combined_output(capsys)
-        assert "Tip" in output
-        assert "1" in output
+        assert output == f"Preprocessed {source}\n"
+
+    @pytest.mark.parametrize("verbose_flag", ["-v", "--verbose"])
+    def test_verbose_result_includes_transformation_details(
+        self, tmp_path, capsys, verbose_flag
+    ):
+        source = tmp_path / "verbose.md"
+        source.write_text("<Tip>Remember.</Tip>\n", encoding="utf-8")
+
+        main(["preprocess", verbose_flag, str(source)])
+
+        assert combined_output(capsys) == (
+            f"Preprocessed {source} "
+            "(Transformations: Tip: 1; discarded presentation attributes: none; "
+            "unknown JSX: none; diagnostics: none)\n"
+        )
 
     def test_backup_name_inserts_orig_before_final_suffix(self, tmp_path):
         source = tmp_path / "api.reference.md"
@@ -82,9 +96,25 @@ class TestDryRun:
 
         assert source.read_text(encoding="utf-8") == original
         assert not (tmp_path / "dry.orig.md").exists()
-        output = combined_output(capsys).lower()
-        assert "dry run" in output or "dry-run" in output
-        assert "section" in output
+        assert combined_output(capsys) == f"Dry run: would preprocess {source}\n"
+
+    def test_verbose_dry_run_includes_transformation_details(
+        self, tmp_path, capsys
+    ):
+        source = tmp_path / "dry.md"
+        original = '<section title="Dry">body</section>\n'
+        source.write_text(original, encoding="utf-8")
+
+        main(["preprocess", "--dry-run", "--verbose", str(source)])
+
+        assert source.read_text(encoding="utf-8") == original
+        assert not (tmp_path / "dry.orig.md").exists()
+        assert combined_output(capsys) == (
+            f"Dry run: would preprocess {source} "
+            "(Transformations: section: 1; "
+            "discarded presentation attributes: none; "
+            "unknown JSX: none; diagnostics: none)\n"
+        )
 
     def test_dry_run_still_rejects_invalid_input_without_writing(
         self, tmp_path, capsys

@@ -124,7 +124,7 @@ class TestMeasureWarning:
             ("<CustomWidget>body</CustomWidget>\n", "CustomWidget"),
         ],
     )
-    def test_any_mdx_finding_warns_then_prints_measurement(
+    def test_any_mdx_finding_warns_concisely_then_prints_measurement(
         self, tmp_path, capsys, caplog, source_text, finding
     ):
         source = tmp_path / "measure.md"
@@ -134,10 +134,29 @@ class TestMeasureWarning:
         main(["measure", str(source)])
 
         output = all_output(capsys, caplog)
-        assert "warning" in output.lower()
-        assert finding in output
+        assert "MDX components may affect measurement or later generation." in output
+        assert finding not in output
         assert "tokens" in output
         assert str(source) in output
+
+    @pytest.mark.parametrize("verbose_flag", ["-v", "--verbose"])
+    def test_verbose_mdx_warning_includes_categorized_findings(
+        self, tmp_path, capsys, caplog, verbose_flag
+    ):
+        source = tmp_path / "measure.md"
+        source.write_text(
+            "<CustomWidget>body</CustomWidget>\n",
+            encoding="utf-8",
+        )
+        caplog.set_level(logging.WARNING)
+
+        main(["measure", verbose_flag, str(source)])
+
+        output = all_output(capsys, caplog)
+        assert "MDX components may affect measurement or later generation." in output
+        assert "Unknown JSX:" in output
+        assert "CustomWidget: 1" in output
+        assert "tokens" in output
 
     def test_fenced_jsx_example_is_measured_without_warning(
         self, tmp_path, capsys, caplog
@@ -151,3 +170,20 @@ class TestMeasureWarning:
         output = all_output(capsys, caplog)
         assert "tokens" in output
         assert "warning" not in output.lower()
+
+    def test_angle_bracket_placeholders_are_measured_without_warning(
+        self, tmp_path, capsys, caplog
+    ):
+        source = tmp_path / "roadmap.md"
+        source.write_text(
+            "Write `decisions/<NNN>_<unit>.md` for each unit.\n",
+            encoding="utf-8",
+        )
+        caplog.set_level(logging.WARNING)
+
+        main(["measure", str(source)])
+
+        output = all_output(capsys, caplog)
+        assert "tokens" in output
+        assert "warning" not in output.lower()
+        assert "Unknown JSX" not in output

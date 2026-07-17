@@ -6,9 +6,14 @@ from __future__ import annotations
 
 import sys
 import argparse
+import logging
 from pathlib import Path
 
+from fit.mdx import MdxDocument
 from fit.measurer import Measurer
+
+
+logger = logging.getLogger(__name__)
 
 
 def add_parser(subparsers) -> argparse.ArgumentParser:
@@ -31,6 +36,11 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         dest="hard_threshold",
         help="Hard token ceiling (default: 5000).",
     )
+    p.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Include categorized MDX findings in warnings.",
+    )
     p.set_defaults(func=run)
     return p
 
@@ -50,6 +60,16 @@ def run(args) -> None:
         raise SystemExit(f"File not found: {path}")
 
     text = path.read_text(encoding="utf-8")
+    mdx_document = MdxDocument(text)
+    if (
+        mdx_document.has_structural_tags
+        or mdx_document.has_content_wrappers
+        or mdx_document.has_unknown_components
+    ):
+        warning = "MDX components may affect measurement or later generation."
+        if args.verbose:
+            warning += "\n" + mdx_document.format_findings()
+        logger.warning(warning)
     measurer = Measurer()
     count = measurer.measure(text)
 

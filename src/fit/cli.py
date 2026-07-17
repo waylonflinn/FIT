@@ -19,9 +19,11 @@ def main(argv=None) -> None:
 
     from fit.commands.generate import add_parser as add_generate
     from fit.commands.measure import add_parser as add_measure
+    from fit.commands.preprocess import add_parser as add_preprocess
 
     add_generate(subparsers)
     add_measure(subparsers)
+    add_preprocess(subparsers)
 
     args = parser.parse_args(argv)
     args.func(args)

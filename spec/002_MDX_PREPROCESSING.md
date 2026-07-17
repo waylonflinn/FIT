@@ -8,7 +8,7 @@ _Elapsed: ~0d_
 
 _Daily logs: Prototype/Requirements: 2026-04-24.md_
 
-_Status: Requirements (1/10)_
+_Status: Debug (8/10)_
 
 _Requires: 001_
 
@@ -59,8 +59,9 @@ silent content loss is not.
   code blocks, including supported tags indented by four spaces.
 - On success, no recognized JSX tag or unknown JSX component remains. Standard
   CommonMark raw HTML may remain.
-- Prints a stable summary containing opening-tag transformation counts, unknown
-  components, and diagnostics.
+- Prints a concise result by default. `-v` / `--verbose` appends a stable
+  summary containing opening-tag transformation counts, discarded presentation
+  attributes, unknown components, and diagnostics.
 - On malformed nesting, an unsupported recognized form, an unknown JSX
   component, or a failed postcondition, exits nonzero and leaves the source and
   backup unchanged.
@@ -111,6 +112,12 @@ Unknown JSX components are uppercase element names not present in the taxonomy.
 They are detected and reported, but not converted. Their presence prevents a
 successful `preprocess` write. Unknown lowercase tags are treated as standard
 raw HTML and remain unchanged.
+
+Component scanning ignores inline code spans as well as fenced code. Outside
+code, an attribute-free, non-self-closing, unpaired all-caps angle token such
+as `<NNN>` is treated as prose placeholder syntax rather than unknown JSX.
+PascalCase names, attributed or self-closing tags, and paired all-caps tags
+remain unknown-JSX findings.
 
 ### Tag taxonomy
 
@@ -249,6 +256,9 @@ need a markdown-it-py parse and introduces no additional dependency.
 | `fit generate` | List findings, recommend `fit preprocess`, exit nonzero | Warn and continue | List findings, recommend `fit preprocess`, exit nonzero |
 | `fit generate --force` | Bypass all MDX guard messages and continue | Bypass | Bypass |
 | `fit measure` | Warn, then print measurement normally | Warn, then print measurement normally | Warn, then print measurement normally |
+
+The `fit measure` warning is one concise line by default. `-v` / `--verbose`
+adds the categorized component findings beneath it.
 
 The `generate` guard runs before constructing `Document` or writing any backup
 or output file.

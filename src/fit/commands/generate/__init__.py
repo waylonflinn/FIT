@@ -89,6 +89,12 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         dest="verbose",
         help="Print actions as they are performed.",
     )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Bypass MDX safety guards and generate from the source as-is.",
+    )
     p.set_defaults(func=run)
     return p
 

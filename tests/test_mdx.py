@@ -78,6 +78,29 @@ class TestScan:
         assert doc.content_wrapper_tags == {}
         assert doc.unknown_components == {}
 
+    def test_ignores_recognized_and_unknown_jsx_inside_code_spans(self):
+        source = (
+            "Use `<Tip>literal</Tip>` and ``<CustomWidget `mode` />`` as examples.\n"
+        )
+        doc = MdxDocument(source)
+
+        assert doc.structural_tags == {}
+        assert doc.content_wrapper_tags == {}
+        assert doc.unknown_components == {}
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "Write decisions/<NNN>_<unit>.md for each unit.\n",
+            "Write `decisions/<NNN>_<unit>.md` for each unit.\n",
+        ],
+    )
+    def test_all_caps_angle_bracket_placeholder_is_not_unknown_jsx(self, source):
+        doc = MdxDocument(source)
+
+        assert doc.unknown_components == {}
+        assert doc.format_findings() == ""
+
     def test_recognizes_multiline_attributes_single_quotes_and_boolean_attribute(self):
         source = (
             "<ParamField\n"

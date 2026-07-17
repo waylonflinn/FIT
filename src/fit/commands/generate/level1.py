@@ -10,6 +10,7 @@ from collections import deque
 from pathlib import Path
 
 from fit.driver import process_file
+from fit.mdx import MdxDocument
 from fit.measurer import Measurer
 
 logger = logging.getLogger(__name__)
@@ -73,9 +74,27 @@ def run(args) -> None:
     """Run Level 1/1.5 generation: structural FIT via BFS driver loop."""
     inline_languages = args.inline_languages  # already a list from argparse
 
+    root_path = Path(args.path)
+    if not args.force:
+        try:
+            mdx_document = MdxDocument(root_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as error:
+            raise SystemExit(f"Could not inspect {root_path} for MDX: {error}") from error
+        if mdx_document.has_structural_tags or mdx_document.has_unknown_components:
+            logger.error(
+                "Unprocessed MDX prevents safe generation. Run `fit preprocess` first.\n"
+                + mdx_document.format_findings()
+            )
+            raise SystemExit(1)
+        if mdx_document.has_content_wrappers:
+            logger.warning(
+                "Content-wrapper MDX remains; generation will continue.\n%s",
+                mdx_document.format_findings(),
+            )
+
     # Queue entries: (path, parent_path | None)
     # parent_path is the root document that contains a link to path; None for the root file.
-    queue: deque[tuple[Path, Path | None]] = deque([(Path(args.path), None)])
+    queue: deque[tuple[Path, Path | None]] = deque([(root_path, None)])
     is_root = True
 
     while queue:
