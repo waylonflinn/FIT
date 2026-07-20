@@ -4,11 +4,11 @@ _Effort: Focused (2)_
 
 _Capability: Compositional (2)_
 
-_Elapsed: —_
+_Elapsed: ~0d_
 
-_Daily logs: Requirements: 2026-07-11_
+_Daily logs: Requirements: 2026-07-11; Implementation: 2026-07-20_
 
-_Status: Requirements (1/10)_
+_Status: Debug (8/10)_
 
 _Requires: 001_
 
@@ -49,10 +49,11 @@ into a one-command corpus sweep that respects per-subtree calibration.
   example, an explicit `--soft-threshold` may be combined with a hard
   threshold from `.fit.toml`; providing one flag does not suppress config
   resolution for the other.
-- **Per-target resolution:** with multiple targets (feature 2), each file
-  resolves against its *own* nearest config. This is deliberate — it's what
-  makes nested overrides work (e.g. a work-unit folder pinned to 3000/5000
-  for cross-model comparability inside a repo calibrated to 5000/8000).
+- **Per-directory resolution:** with multiple targets (feature 2), each unique
+  parent directory resolves against its *own* nearest config and shares that
+  result across its files. This is deliberate — it's what makes nested
+  overrides work (e.g. a work-unit folder pinned to 3000/5000 for cross-model
+  comparability inside a repo calibrated to 5000/8000).
 - **Generate inheritance:** `generate` resolves thresholds from its
   user-supplied root target once. Any descendants produced and processed by
   recursive generation inherit those resolved values for that run; generation
@@ -69,16 +70,23 @@ into a one-command corpus sweep that respects per-subtree calibration.
   Other sections/keys (e.g. `generate`'s inline thresholds) MAY be added
   later under the same mirroring rule.
 - **Validation and compatibility:**
-  - Malformed TOML is a hard error that identifies the config file.
+  - Malformed or unreadable TOML is a hard error that identifies the config
+    file when either threshold depends on configuration.
   - Threshold values must be positive integers, and soft must not exceed hard.
-    Violations are hard errors.
+    Violations are hard errors when either threshold depends on configuration.
+  - When both threshold flags are present, an invalid config file is ignored
+    with a warning. This is an explicit escape hatch for operating on a tree
+    containing broken config files. The two flag values are still validated,
+    and an invalid override pair remains a hard error.
   - Unknown keys inside `[thresholds]` are ignored with a warning. Unknown
     top-level sections are ignored silently so future sections remain
     forward-compatible.
   - Preserve the package's Python 3.10 support: use `tomllib` where available
     and a compatible fallback on Python 3.10.
-- **Transparency:** output reports where each threshold came from
-  (flag / config file path / default) under verbose output.
+- **Transparency:** verbose output reports where each threshold came from
+  (flag / config file path / default). For multi-file measurement, resolve and
+  report once per unique parent directory; every measured file in one
+  directory shares that result.
 - **Sync obligation:** the convention is already documented in
   `skills/fit-creation/SKILL.md` (which currently instructs agents to pass
   resolved values as flags). When this lands, update the skill to drop the
@@ -111,8 +119,11 @@ into a one-command corpus sweep that respects per-subtree calibration.
   - Missing paths and explicitly listed non-Markdown files are errors rather
     than silently skipped, except that files matching a recognized backup
     form remain explicitly measurable.
-- **Output:** retain the existing per-file line for each target. When more
-  than one file is measured, append a trailing summary containing:
+- **Output:** retain one per-file line for each target. Format token counts
+  with thousands separators and left-pad them to the width of `99,999` so
+  ordinary multi-file output aligns. Use compact status labels: `fits`,
+  `soft`, and `hard`. When more than one file is measured, append a trailing
+  summary containing:
   - total files measured;
   - counts of fits / over-soft / over-hard;
   - total token count across all measured files.
@@ -130,3 +141,15 @@ into a one-command corpus sweep that respects per-subtree calibration.
 # unit folders with their own .fit.toml resolving tighter automatically:
 fit measure --recursive design/image_store/
 ```
+
+---
+
+## Implementation
+
+- Shared resolution lives in `src/fit/config.py` and is invoked by
+  `src/fit/cli.py` before command dispatch.
+- `generate` receives one resolved threshold pair for its root invocation;
+  its existing recursive driver therefore inherits that pair for descendants.
+- `measure` expands and validates its inputs once, then measures a stable list
+  of `(path, resolved thresholds)` targets through one code path.
+- Contract coverage lives in `tests/test_measure_improvements.py`.

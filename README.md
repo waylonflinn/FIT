@@ -119,6 +119,34 @@ After installation, the `fit` command is available at `.venv/bin/fit`.
 
 ## Usage
 
+### Threshold configuration
+
+`fit generate` and `fit measure` resolve their soft and hard thresholds
+independently for each command-line target:
+
+1. An explicit `--soft-threshold` or `--hard-threshold` flag.
+2. The corresponding value in the nearest `.fit.toml`, walking from the
+   target's directory toward the filesystem root.
+3. The package default: soft `3000`, hard `5000`.
+
+```toml
+[thresholds]
+soft = 5000
+hard = 8000
+```
+
+Nested `.fit.toml` files provide per-subtree overrides. Multi-file measurement
+resolves each parent directory independently and applies that result to its
+files. Recursive generation resolves against its root input once and uses
+those values for every generated descendant.
+Use `--verbose` to show each effective value and its source. Measurement emits
+one threshold line per parent directory because files in one directory share
+the same resolution.
+
+An invalid `.fit.toml` is normally a hard error. Supplying both threshold flags
+provides an escape hatch: FIT warns, ignores the invalid config, and uses the
+fully explicit pair. Both override values must still be valid.
+
 ### `fit generate`
 
 Generate a FIT from a markdown file. The file is split in-place; the original is backed up as `<filename>.unfit.md` before any writes.
@@ -130,8 +158,8 @@ fit generate [options] <path>
 | Option | Default | Description |
 |---|---|---|
 | `--level` | `1` | FIT generation level |
-| `--soft-threshold` | `3000` | Soft token target; triggers splitting |
-| `--hard-threshold` | `5000` | Hard token ceiling; triggers warnings |
+| `--soft-threshold` | config or `3000` | Soft token target; triggers splitting |
+| `--hard-threshold` | config or `5000` | Hard token ceiling; triggers warnings |
 | `--inline-threshold` | `600` | Segments below this are inlined verbatim |
 | `--inline-threshold-reduction-increment` | `100` | Amount inline threshold drops per iteration |
 | `--trivial-extension-threshold` | `25` | Inline single-paragraph segments within this many tokens of the paragraph |
@@ -151,23 +179,36 @@ fit generate [options] <path>
 
 ### `fit measure`
 
-Estimate the token count of a markdown file and check it against the thresholds.
+Estimate token counts for Markdown files and check them against their resolved
+thresholds. Files and directories may be mixed in one invocation. Directory
+arguments are flat by default; use `-r` / `--recursive` to sweep a subtree.
+Implicit directory expansion includes `.md` files only and skips generated
+backup files.
 
 ```
-fit measure [options] <path>
+fit measure [options] <path> [<path> ...]
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `--soft-threshold` | `3000` | Soft token target |
-| `--hard-threshold` | `5000` | Hard token ceiling |
+| `--soft-threshold` | config or `3000` | Soft token target |
+| `--hard-threshold` | config or `5000` | Hard token ceiling |
+| `--recursive`, `-r` | off | Include Markdown files in nested directories |
+| `--verbose`, `-v` | off | Show threshold origins and detailed MDX findings |
 
 **Example:**
 
 ```bash
 .venv/bin/fit measure doc/overview.md
-# 2137 tokens — fits  (doc/overview.md)
+#  2,137 tokens — fits  (doc/overview.md)
+
+.venv/bin/fit measure --recursive docs/ design/
+# ...
+# Summary: 12 files — 10 fit, 2 over soft, 0 over hard; 31,420 tokens total
 ```
+
+When any target exceeds its hard threshold, `fit measure` exits with status
+`1`. Soft-threshold violations alone do not produce a nonzero exit.
 
 ---
 
@@ -182,6 +223,7 @@ forge/fit/
 │   └── fit/
 │       ├── __init__.py      # public API: Measurer, Segment, Document, Writer, ...
 │       ├── cli.py           # top-level argument parsing and subcommand dispatch
+│       ├── config.py        # shared per-target threshold resolution
 │       ├── commands/
 │       │   ├── generate/
 │       │   │   ├── __init__.py   # generate subcommand args and level dispatch

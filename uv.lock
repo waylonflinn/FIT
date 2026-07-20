@@ -48,6 +48,7 @@ source = { editable = "." }
 dependencies = [
     { name = "markdown-it-py" },
     { name = "pygments" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.dev-dependencies]
@@ -60,6 +61,7 @@ dev = [
 requires-dist = [
     { name = "markdown-it-py", specifier = ">=3.0.0" },
     { name = "pygments", specifier = ">=2.0.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
 ]
 
 [package.metadata.requires-dev]

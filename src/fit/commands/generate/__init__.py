@@ -22,16 +22,16 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
     p.add_argument(
         "-s", "--soft-threshold",
         type=int,
-        default=3000,
+        default=None,
         dest="soft_threshold",
-        help="Soft token target; triggers splitting (default: 3000).",
+        help="Soft token target; overrides .fit.toml and the 3000 default.",
     )
     p.add_argument(
         "-t", "--hard-threshold",
         type=int,
-        default=5000,
+        default=None,
         dest="hard_threshold",
-        help="Hard token ceiling (default: 5000).",
+        help="Hard token ceiling; overrides .fit.toml and the 5000 default.",
     )
     p.add_argument(
         "-i", "--inline-threshold",

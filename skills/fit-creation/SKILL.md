@@ -12,17 +12,28 @@ only what it needs, (2) pointers remain in context so later-relevant material
 is reachable, (3) **no information is lost** — FIT is not summarization,
 though it may use summaries to optimize access.
 
-## Thresholds — resolve these before measuring anything
+## Thresholds
 
 Node sizes are governed by two numbers: **soft** (split trigger) and **hard**
 (never exceed). They are *calibrated per repository* to its primary consumer
 models — never treat them as universal constants.
 
 **Resolution order:**
-1. Look for `.fit.toml` in the document's own directory, then each ancestor
-   directory up to the repository root. **Closest file wins** (this enables
-   per-subtree overrides, e.g. a work unit calibrated tighter than its repo).
-2. If none exists, use the package defaults: soft 3000 / hard 5000.
+1. An explicit `--soft-threshold` or `--hard-threshold` CLI flag.
+2. The corresponding key in `.fit.toml` in the document's own directory, then
+   each ancestor directory up to the repository root. **Closest file wins**
+   (this enables per-subtree overrides, e.g. a work unit calibrated tighter
+   than its repo).
+3. The package defaults: soft 3000 / hard 5000.
+
+Soft and hard resolve independently. The CLI performs this resolution for
+`measure` and `generate`; do not manually repeat config values as flags unless
+you intend to override them.
+
+If a broken `.fit.toml` prevents work on a tree, provide both threshold flags
+as an explicit escape hatch. FIT warns and ignores the invalid config only
+when neither effective threshold depends on it. Then, repair the broken config
+when convenient.
 
 ```toml
 # .fit.toml
@@ -31,10 +42,9 @@ soft = 5000
 hard = 8000
 ```
 
-Pass the resolved values explicitly on every CLI call — the tool does not read
-the config itself (yet):
-
 ```bash
+.venv/bin/fit measure doc/FILE.md
+.venv/bin/fit measure --recursive doc/
 .venv/bin/fit measure --soft-threshold 5000 --hard-threshold 8000 doc/FILE.md
 ```
 
@@ -107,9 +117,9 @@ what deserves to stay near the root.
 
 ## Maintenance
 
-- After any substantial edit, re-run `fit measure` with the resolved
-  thresholds. Over soft → split candidate at the next natural pause; over
-  hard → split now.
+- After any substantial edit, re-run `fit measure`; it resolves the target's
+  thresholds automatically against a present `.fit.toml` file. Over soft → split candidate at the next natural
+  pause; over hard → split now.
 - Editing a subdocument changes its size: refresh the parent's token
   annotation when it drifts more than ~20%.
 - When a subdocument outgrows the thresholds, recurse: it becomes an overview
